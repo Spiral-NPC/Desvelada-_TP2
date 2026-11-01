@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .font-pixel {
+    font-family: 'Press Start 2P', monospace;
+  }
+  .font-retro {
+    font-family: 'VT323', monospace;
+  }
+  .font-sans-modern {
+    font-family: 'Space Grotesk', system-ui, sans-serif;
+  }
+}
+
+/* Prevent mobile pull-to-refresh, zooming and selection */
+html, body {
+  overscroll-behavior: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+

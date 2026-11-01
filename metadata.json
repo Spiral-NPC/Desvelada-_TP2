@@ -1,0 +1,10 @@
+{
+  "name": "Desvelada - Experiencia Inmersiva de Terror y Minijuegos",
+  "description": "Juego web inmersivo en primera persona con Three.js, giroscopio y sensores. Mantente despierto jugando en tu consola portátil mientras vigilas tu habitación para que el cuco no te atrape.",
+  "requestFramePermissions": [
+    "camera",
+    "accelerometer",
+    "gyroscope"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
