@@ -21,6 +21,9 @@ export class RoomScene {
   public videoTexture: THREE.VideoTexture | null = null;
   public arBackgroundMesh: THREE.Mesh | null = null;
   public roomGroup: THREE.Group;
+  public flashlight: THREE.SpotLight;
+  public flashlightTarget: THREE.Object3D;
+  private _camDir = new THREE.Vector3();
 
   // Cuco monster parts for animation
   private cucoEyes: THREE.Mesh[] = [];
@@ -61,9 +64,9 @@ export class RoomScene {
       }
     })();
 
-    // Scene setup
+    // Scene setup - Pitch dark bedroom
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.FogExp2(0x060814, 0.08);
+    this.scene.fog = new THREE.FogExp2(0x010204, 0.12);
 
     // Camera at bed eye level
     this.camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 40);
@@ -77,39 +80,52 @@ export class RoomScene {
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.1;
+    this.renderer.toneMappingExposure = 1.0;
     this.renderer.setPixelRatio(this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = !this.isSoftwareGl;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     container.appendChild(this.renderer.domElement);
 
-    // Procedural Studio Environment for metallic/plastic reflections
+    // Procedural Studio Environment (very low intensity for dark room)
     const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
-    this.scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.01).texture;
     pmremGenerator.dispose();
 
-    // Lighting setup
-    const hemiLight = new THREE.HemisphereLight(0x223355, 0x090a12, 0.7);
+    // Pitch dark bedroom lighting
+    const hemiLight = new THREE.HemisphereLight(0x060810, 0x000000, 0.08);
     this.scene.add(hemiLight);
 
-    // Moonlight through window
-    this.moonlight = new THREE.DirectionalLight(0x4466aa, 1.8);
+    // Faint moonlight through window
+    this.moonlight = new THREE.DirectionalLight(0x18253a, 0.15);
     this.moonlight.position.set(-2, 4, -4);
-    this.moonlight.castShadow = !this.isSoftwareGl;
-    if (!this.isSoftwareGl) {
-      this.moonlight.shadow.mapSize.width = 1024;
-      this.moonlight.shadow.mapSize.height = 1024;
-      this.moonlight.shadow.bias = -0.0005;
-      this.moonlight.shadow.normalBias = 0.02;
-    }
     this.scene.add(this.moonlight);
 
-    // Warm cozy bedside lamp (soft nightlight)
-    this.lampLight = new THREE.PointLight(0xffaa55, 1.2, 7, 1.5);
-    this.lampLight.position.set(-1.4, 1.1, 0.2);
-    this.lampLight.castShadow = !this.isSoftwareGl;
+    // Bedside lamp (very faint warm nightstand glow)
+    this.lampLight = new THREE.PointLight(0xffaa44, 0.2, 2.5, 2);
+    this.lampLight.position.set(-1.45, 0.95, 0.5);
     this.scene.add(this.lampLight);
+
+    // --- PLAYER FLASHLIGHT (Linterna estrecha de radio pequeño hacia donde apuntas) ---
+    // Narrow cone (Math.PI / 10 = 18 degrees) with short, focused reach
+    this.flashlight = new THREE.SpotLight(0xffeedd, 5.5, 12, Math.PI / 10, 0.3, 1.8);
+    this.flashlight.position.copy(this.camera.position);
+    this.flashlight.castShadow = !this.isSoftwareGl;
+    if (!this.isSoftwareGl) {
+      this.flashlight.shadow.mapSize.width = 512;
+      this.flashlight.shadow.mapSize.height = 512;
+      this.flashlight.shadow.bias = -0.001;
+    }
+
+    this.flashlightTarget = new THREE.Object3D();
+    this.scene.add(this.flashlightTarget);
+    this.flashlight.target = this.flashlightTarget;
+    this.scene.add(this.flashlight);
+
+    // Subtle console screen glow on hands
+    const consoleGlow = new THREE.PointLight(0x38bdf8, 0.35, 1.2, 2);
+    consoleGlow.position.set(0, -0.1, -0.2);
+    this.camera.add(consoleGlow);
 
     // Build the 3D Room
     this.roomGroup = new THREE.Group();
@@ -831,12 +847,44 @@ export class RoomScene {
     // 1. Update console canvas texture
     this.screenTexture.needsUpdate = true;
 
-    // 2. Animate handheld console position based on looking angle:
-    // When looking down (cameraPitch < -0.2), console moves up into view and opens up!
-    // When looking up/around, console dips smoothly downwards out of view so player has clear 360 view!
+    // 2. Update flashlight beam direction to match camera view
+    this.camera.getWorldDirection(this._camDir);
+    this.flashlight.position.copy(this.camera.position);
+    this.flashlightTarget.position.copy(this.camera.position).addScaledVector(this._camDir, 6);
+
+    // 3. When observing console: Room is pitch black, flashlight is off, Cuco is completely hidden!
+    // When looking at room: Flashlight illuminates narrow beam in the darkness!
+    const targetFlashlightIntensity = lookingAtConsole ? 0.0 : 5.5;
+    this.flashlight.intensity = THREE.MathUtils.damp(
+      this.flashlight.intensity,
+      targetFlashlightIntensity,
+      12,
+      dt
+    );
+
+    // Hide room details completely when looking down at the console for total darkness isolation!
+    this.roomGroup.visible = !lookingAtConsole;
+
+    // Cuco is strictly NOT visible when playing on the console (unless jumpscare attack is in progress)
+    if (lookingAtConsole && !this.cucoMonster.position.equals(this.camera.position)) {
+      // Check if jumpscare is not lunging
+      if (this.cucoMonster.position.y > -5 && this.cucoMonster.position.y < 5) {
+        // Only hide if not mid-jumpscare lunge
+        const distToCam = this.cucoMonster.position.distanceTo(this.camera.position);
+        if (distToCam > 1.2) {
+          this.cucoMonster.visible = false;
+        }
+      }
+    }
+
+    // 4. Animate handheld console position and scale:
+    // User request: The minigame SCREEN itself must be centered in the viewport!
+    // Screen center in console local space is at Y ≈ +0.105 * scale.
+    // Setting targetConsoleY = -0.16 aligns the screen center exactly with Y ≈ 0 (dead center)!
     const targetConsoleY = lookingAtConsole ? -0.16 : -0.65;
-    const targetConsoleZ = lookingAtConsole ? -0.36 : -0.55;
-    const targetConsoleRotX = lookingAtConsole ? 0.35 : 0.85;
+    const targetConsoleZ = lookingAtConsole ? -0.26 : -0.55;
+    const targetConsoleRotX = lookingAtConsole ? 0.20 : 0.85;
+    const targetConsoleScale = lookingAtConsole ? 1.50 : 0.85;
 
     this.consoleMeshGroup.position.y = THREE.MathUtils.damp(
       this.consoleMeshGroup.position.y,
@@ -856,6 +904,10 @@ export class RoomScene {
       8,
       dt
     );
+
+    const currentScale = this.consoleMeshGroup.scale.x;
+    const newScale = THREE.MathUtils.damp(currentScale, targetConsoleScale, 8, dt);
+    this.consoleMeshGroup.scale.set(newScale, newScale, newScale);
 
     // 3. Subtle floating dust motion
     const positions = this.dustParticles.geometry.attributes.position.array as Float32Array;

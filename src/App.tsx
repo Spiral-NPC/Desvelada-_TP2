@@ -5,7 +5,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
-import { GameState, MiniGameType, MonsterLocation, MonsterState, SensorStatus, GameStats } from './types';
+import { GameState, MonsterLocation, MonsterState, SensorStatus, GameStats } from './types';
 import { soundEngine } from './audio/SoundEngine';
 import { MiniGameEngine } from './minigames/MiniGameEngine';
 import { RoomScene } from './three/RoomScene';
@@ -28,13 +28,12 @@ export default function App() {
   const [boredom, setBoredom] = useState<number>(15);
   const [isSleeping, setIsSleeping] = useState<boolean>(false);
   const [lookingAtConsole, setLookingAtConsole] = useState<boolean>(true);
-  const [currentMinigame, setCurrentMinigame] = useState<MiniGameType>('flappy');
   const [isMuted, setIsMuted] = useState<boolean>(false);
-  const [cucoWarning, setCucoWarning] = useState<boolean>(false);
 
   // Time & stats
   const [stats, setStats] = useState<GameStats>({
     score: 0,
+    level: 1,
     monstersRepelled: 0,
     timeSurvivedMinutes: 0,
     currentHour: 0, // 0 = 12 AM
@@ -52,7 +51,7 @@ export default function App() {
 
   // Camera orientation angles (Euler radians)
   const cameraYaw = useRef<number>(0);
-  const cameraPitch = useRef<number>(-0.45); // start looking at console
+  const cameraPitch = useRef<number>(-0.45); // start looking down at console
   const targetYaw = useRef<number>(0);
   const targetPitch = useRef<number>(-0.45);
 
@@ -82,10 +81,16 @@ export default function App() {
     const miniGame = new MiniGameEngine();
     miniGameRef.current = miniGame;
 
-    // Reduce boredom on minigame actions
+    // Reduce boredom on alien hit
     miniGame.onActionSuccess = () => {
-      setBoredom((prev) => Math.max(0, prev - 4.5));
+      setBoredom((prev) => Math.max(0, prev - 4.0));
       setStats((prev) => ({ ...prev, score: miniGame.score }));
+    };
+
+    // Level up reward
+    miniGame.onLevelUp = (newLevel) => {
+      setBoredom((prev) => Math.max(0, prev - 22)); // big adrenaline rush on level clear!
+      setStats((prev) => ({ ...prev, level: newLevel, score: miniGame.score }));
     };
 
     const roomScene = new RoomScene(mountRef.current, miniGame);
@@ -240,6 +245,7 @@ export default function App() {
   // Keyboard navigation & controls
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (gameState !== 'playing') return;
       if (e.repeat) return;
       if (e.code === 'KeyC') toggleLook();
       if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyZ') {
@@ -257,11 +263,12 @@ export default function App() {
         mini.triggerActionA();
       }
       if (e.code === 'KeyK' || e.code === 'KeyR') {
-        mini.reset();
+        mini.reset(false);
       }
     };
 
     const onKeyUp = (e: KeyboardEvent) => {
+      if (gameState !== 'playing') return;
       if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyZ') {
         endSleeping();
       }
@@ -283,7 +290,7 @@ export default function App() {
 
   // Touch / Pointer Drag for 360 degree room rotation
   const handlePointerDown = (e: React.PointerEvent) => {
-    // If tapping UI buttons, ignore drag
+    if (gameState !== 'playing') return;
     if ((e.target as HTMLElement).closest('button, input, select')) return;
     isDragging.current = true;
     lastTouchX.current = e.clientX;
@@ -291,7 +298,7 @@ export default function App() {
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isDragging.current) return;
+    if (gameState !== 'playing' || !isDragging.current) return;
     const deltaX = e.clientX - lastTouchX.current;
     const deltaY = e.clientY - lastTouchY.current;
     lastTouchX.current = e.clientX;
@@ -306,14 +313,7 @@ export default function App() {
     isDragging.current = false;
   };
 
-  // Change Minigame
-  const handleMinigameChange = (type: MiniGameType) => {
-    setCurrentMinigame(type);
-    miniGameRef.current?.setGameType(type);
-    soundEngine.playButtonClick();
-  };
-
-  // Restart game
+  // Restart game after GameOver
   const handleRestart = () => {
     setBoredom(15);
     setIsSleeping(false);
@@ -323,16 +323,21 @@ export default function App() {
     monsterRef.current = {
       active: false,
       location: 'closet',
-      timer: 5.0,
-      maxTimer: 5.0,
+      timer: 5.5,
+      maxTimer: 5.5,
       spotted: false,
       isAttacking: false,
       attackProgress: 0,
     };
     sceneRef.current?.hideCuco();
-    miniGameRef.current?.reset();
+
+    // Preserve the level achieved in Space Invaders!
+    const currentLevel = stats.level;
+    miniGameRef.current?.reset(true);
+
     setStats({
       score: 0,
+      level: currentLevel,
       monstersRepelled: 0,
       timeSurvivedMinutes: 0,
       currentHour: 0,
@@ -345,9 +350,8 @@ export default function App() {
   useEffect(() => {
     let animId = 0;
     let lastTime = performance.now();
-    let cucoSpawnCountdown = 12 + Math.random() * 8; // seconds until first spawn
+    let cucoSpawnCountdown = 14 + Math.random() * 8; // seconds until first stealth spawn
     let clockTickTimer = 0;
-    let heartbeatTimer = 0;
 
     const loop = (now: number) => {
       const dt = Math.min(0.1, (now - lastTime) / 1000);
@@ -369,6 +373,16 @@ export default function App() {
         const isLookingDown = cameraPitch.current < -0.22;
         setLookingAtConsole(isLookingDown);
 
+        // PAUSE / RESUME MINIGAME:
+        // When looking down, minigame runs active!
+        // When looking up at the room OR feigning sleep, minigame pauses immediately!
+        if (isLookingDown && !isSleeping && gameState === 'playing') {
+          miniGame.setPaused(false);
+          miniGame.update(dt);
+        } else {
+          miniGame.setPaused(true);
+        }
+
         // 2. State specific updates
         if (gameState === 'playing') {
           // --- Clock & Night Progression ---
@@ -378,7 +392,6 @@ export default function App() {
             soundEngine.playClockTick();
             setStats((prev) => {
               const newSeconds = prev.gameTimeSeconds + 1;
-              // 40 seconds = 1 in-game hour (total night = 240 seconds ~ 4 minutes)
               const hour = Math.floor(newSeconds / 40);
               const hourDisplay = hour === 0 ? '12:00 AM' : `${hour}:00 AM`;
               scene.updateClockDisplay(hourDisplay);
@@ -398,20 +411,27 @@ export default function App() {
           }
 
           // --- Boredom / Sleep Meter Logic ---
+          // Rule: When not playing on the console, meter fills in exactly 3 seconds (33.3% per second)!
           if (isSleeping) {
-            // Feigning sleep: boredom increases slightly slower or pauses
-            setBoredom((prev) => Math.min(100, prev + 1.2 * dt));
-          } else if (isLookingDown) {
-            // Looking at console: actively playing minigame
-            miniGame.update(dt);
-            // Passive small boredom drain if interacting
-            setBoredom((prev) => Math.min(100, prev + 0.8 * dt));
-          } else {
-            // Looking around the room: NOT playing minigame! Boredom rises faster!
+            // Feigning sleep: fills at a measured pace so player can trick the Cuco without instantly falling asleep
             setBoredom((prev) => {
-              const next = prev + 3.2 * dt;
+              const next = prev + (100 / 6.0) * dt;
               if (next >= 100) {
-                // Fell asleep!
+                soundEngine.playSleepFall();
+                setGameState('slept');
+                return 100;
+              }
+              return next;
+            });
+          } else if (isLookingDown) {
+            // Looking down and actively playing: drains boredom rapidly so you stay wide awake!
+            setBoredom((prev) => Math.max(0, prev - 50.0 * dt));
+          } else {
+            // NOT playing on the console (looking around the dark room):
+            // Exactly 3 seconds without playing reaches 100% and you fall asleep!
+            setBoredom((prev) => {
+              const next = prev + (100 / 3.0) * dt;
+              if (next >= 100) {
                 soundEngine.playSleepFall();
                 setGameState('slept');
                 return 100;
@@ -420,55 +440,46 @@ export default function App() {
             });
           }
 
-          // --- CUCO MONSTER LOGIC ---
+          // --- STEALTH CUCO MONSTER LOGIC ---
+          // No warnings, no heartbeat spoiler sound, no UI alert banner!
+          // Pure stealth: Player must physically sweep the dark room with flashlight!
           const monster = monsterRef.current;
           if (!monster.active) {
             cucoSpawnCountdown -= dt;
             if (cucoSpawnCountdown <= 0) {
-              // Spawn Cuco in a random spot!
+              // Spawn Cuco silently in a random spot!
               const spots: MonsterLocation[] = ['closet', 'door', 'window', 'footbed', 'desk'];
               const chosen = spots[Math.floor(Math.random() * spots.length)];
               monster.active = true;
               monster.location = chosen;
-              // Timer to feign sleep: 4.5 seconds
-              monster.timer = 4.5;
-              monster.maxTimer = 4.5;
+              // Timer to feign sleep: 5.5 seconds before it lunges
+              monster.timer = 5.5;
+              monster.maxTimer = 5.5;
               monster.spotted = false;
               monster.isAttacking = false;
               monster.attackProgress = 0;
 
               scene.spawnCuco(chosen);
-              soundEngine.playMonsterStalk();
-              setCucoWarning(true);
+              // SILENT: No soundEngine.playMonsterStalk() as requested!
             }
           } else {
-            // Heartbeat audio while monster is present
-            heartbeatTimer += dt;
-            const heartInterval = Math.max(0.4, monster.timer / monster.maxTimer * 1.2);
-            if (heartbeatTimer >= heartInterval) {
-              heartbeatTimer = 0;
-              const urgency = 1 - monster.timer / monster.maxTimer;
-              soundEngine.playHeartbeat(urgency);
-            }
-
+            // SILENT: No heartbeat countdown sound as requested!
             if (isSleeping) {
-              // Player successfully feigned sleep!
-              // Decrement attack threat or repel monster after 1.4 seconds of sleep
+              // Player is pretending to sleep with blanket!
               monster.timer -= dt * 2.0;
               if (monster.timer <= 1.0) {
-                // Cuco is fooled and retreats!
+                // Cuco is fooled and silently retreats!
                 scene.hideCuco();
                 soundEngine.playMonsterRetreat();
                 monster.active = false;
-                setCucoWarning(false);
                 setStats((prev) => ({ ...prev, monstersRepelled: prev.monstersRepelled + 1 }));
-                cucoSpawnCountdown = 14 + Math.random() * 10;
+                cucoSpawnCountdown = 16 + Math.random() * 10;
               }
             } else {
-              // Player is NOT sleeping: countdown to jumpscare!
+              // Player is not sleeping: timer ticks down
               monster.timer -= dt;
               if (monster.timer <= 0) {
-                // JUMPSCARE TRIGGERED!
+                // JUMPSCARE ATTACK!
                 monster.isAttacking = true;
                 setGameState('jumpscare');
                 soundEngine.playJumpscare();
@@ -476,17 +487,10 @@ export default function App() {
             }
           }
         } else if (gameState === 'jumpscare') {
-          // Animate Cuco charging forward directly into camera!
+          // Rapid Cuco lunge straight into camera!
           const monster = monsterRef.current;
-          monster.attackProgress = Math.min(1.0, monster.attackProgress + dt * 2.2);
+          monster.attackProgress = Math.min(1.0, monster.attackProgress + dt * 4.0);
           scene.updateJumpscare(monster.attackProgress);
-
-          if (monster.attackProgress >= 1.0) {
-            // Once jumped, show Game Over
-            setTimeout(() => {
-              scene.hideCuco();
-            }, 600);
-          }
         }
 
         // 3. Update Scene & Handheld Console
@@ -517,6 +521,17 @@ export default function App() {
       {/* Hidden WebRTC video for AR mode */}
       <video ref={videoRef} playsInline muted className="hidden" />
 
+      {/* --- NARROW FLASHLIGHT VIGNETTE (Small focused radius in dark room) --- */}
+      {!lookingAtConsole && !isSleeping && gameState === 'playing' && (
+        <div
+          className="pointer-events-none fixed inset-0 z-10 transition-opacity duration-300"
+          style={{
+            background:
+              'radial-gradient(circle at center, rgba(255, 245, 225, 0.05) 0%, rgba(255, 240, 210, 0.02) 12%, rgba(0, 0, 0, 0.65) 24%, rgba(0, 0, 0, 0.96) 40%, #000000 60%)',
+          }}
+        />
+      )}
+
       {/* --- BLANKET / FEIGN SLEEP COVER --- */}
       <div
         className={`pointer-events-none fixed inset-0 z-40 transition-opacity duration-300 ${
@@ -541,7 +556,7 @@ export default function App() {
         <div
           className="pointer-events-none fixed inset-0 z-20 transition-opacity duration-500"
           style={{
-            background: `radial-gradient(ellipse at center, transparent 35%, rgba(10, 5, 20, ${
+            background: `radial-gradient(ellipse at center, transparent 35%, rgba(5, 2, 10, ${
               (boredom - 60) / 45
             }) 100%)`,
           }}
@@ -555,19 +570,17 @@ export default function App() {
             boredom={boredom}
             timeString={timeString}
             gameTimeSeconds={stats.gameTimeSeconds}
+            level={stats.level}
             lookingAtConsole={lookingAtConsole}
             isSleeping={isSleeping}
             onSleepStart={startSleeping}
             onSleepEnd={endSleeping}
             onToggleLook={toggleLook}
-            currentMinigame={currentMinigame}
-            onChangeMinigame={handleMinigameChange}
             sensorStatus={sensorStatus}
             onToggleGyro={toggleGyroscope}
             onToggleCamera={toggleCamera}
             isMuted={isMuted}
             onToggleMute={toggleMute}
-            cucoWarning={cucoWarning}
           />
 
           <ConsoleControls
@@ -582,7 +595,7 @@ export default function App() {
               }
             }}
             onButtonAPress={() => miniGameRef.current?.triggerActionA()}
-            onButtonBPress={() => miniGameRef.current?.reset()}
+            onButtonBPress={() => miniGameRef.current?.reset(true)}
           />
         </>
       )}
@@ -595,15 +608,14 @@ export default function App() {
         />
       )}
 
-      {/* --- GAME OVER SCREENS --- */}
-      {(gameState === 'jumpscare' || gameState === 'slept') &&
-        monsterRef.current.attackProgress >= 0.8 && (
-          <GameOverModal
-            reason={gameState === 'jumpscare' ? 'jumpscare' : 'slept'}
-            stats={stats}
-            onRestart={handleRestart}
-          />
-        )}
+      {/* --- GAME OVER SCREENS (Zero delay, locks background game) --- */}
+      {(gameState === 'slept' || gameState === 'jumpscare') && (
+        <GameOverModal
+          reason={gameState === 'jumpscare' ? 'jumpscare' : 'slept'}
+          stats={stats}
+          onRestart={handleRestart}
+        />
+      )}
 
       {/* --- VICTORY 6 AM SCREEN --- */}
       {gameState === 'victory' && (

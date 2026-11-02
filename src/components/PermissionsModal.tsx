@@ -148,9 +148,9 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({
               <div className="flex items-start gap-2.5 rounded-xl bg-slate-900/60 p-3 border border-slate-800">
                 <Gamepad2 className="h-5 w-5 shrink-0 text-cyan-400 mt-0.5" />
                 <div>
-                  <strong className="text-white">1. Mira hacia abajo para jugar:</strong>
+                  <strong className="text-white">1. Invasores del Espacio por Niveles:</strong>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    Al inclinar la vista hacia abajo sostienes tu consola. Juega los minijuegos para mantenerte despierto y vaciar la barra de sueño.
+                    Al mirar hacia abajo juegas a Space Invaders. Elimina a las tropas alienígenas para superar cada nivel. Al levantar la vista, el juego se <strong className="text-amber-400">pausa automáticamente</strong>.
                   </p>
                 </div>
               </div>
@@ -158,9 +158,9 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({
               <div className="flex items-start gap-2.5 rounded-xl bg-slate-900/60 p-3 border border-slate-800">
                 <Eye className="h-5 w-5 shrink-0 text-amber-400 mt-0.5" />
                 <div>
-                  <strong className="text-white">2. Mira hacia arriba y revisa la habitación:</strong>
+                  <strong className="text-white">2. Habitación a oscuras y linterna:</strong>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    El juego se pausará. Gira 360° con tu teléfono o deslizando con el dedo para vigilar el armario, la puerta, la ventana o tu escritorio.
+                    Todo está en penumbra. Tu cámara proyecta una tenue linterna hacia donde mires para registrar el armario, la puerta, la ventana o el escritorio.
                   </p>
                 </div>
               </div>
@@ -168,9 +168,9 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({
               <div className="flex items-start gap-2.5 rounded-xl bg-slate-900/60 p-3 border border-slate-800">
                 <AlertTriangle className="h-5 w-5 shrink-0 text-red-400 mt-0.5" />
                 <div>
-                  <strong className="text-white">3. Si ves al Cuco: ¡Hazte el dormido!</strong>
+                  <strong className="text-white">3. ¡El Cuco no avisa! Hazte el dormido:</strong>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    Tienes pocos segundos. Mantén presionado el botón <span className="text-indigo-300 font-bold">FINGIR DORMIR</span> (o tecla Shift/Espacio) para taparte los ojos con la frazada. Al verte dormido, se irá.
+                    No habrá alertas en pantalla ni sonidos de advertencia. Si alumbras al Cuco acechando, mantén presionado <span className="text-indigo-300 font-bold">FINGIR DORMIR</span> con la frazada antes de que se lance sobre ti.
                   </p>
                 </div>
               </div>

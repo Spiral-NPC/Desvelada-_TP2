@@ -1,19 +1,47 @@
 /**
- * MiniGameEngine: Renders 8-bit retro arcade games onto a dedicated 2D canvas (240x160)
- * which textures the 3D handheld console in real-time.
+ * MiniGameEngine: Dedicated 8-bit Space Invaders game for the handheld console.
+ * - Dynamic level variations:
+ *   * Level 1: Classic Swarm
+ *   * Level 2: V-Formation (Arrowhead)
+ *   * Level 3: Armored Mechs (2 HP + Shields)
+ *   * Level 4: Split Flanks
+ *   * Level 5, 10, 15...: BOSS BATTLE (Giant Mothership with HP Bar & Spread Cannons)
+ * - Retains current level on console death (does NOT reset to level 1).
+ * - Fast arcade pacing with dynamic acceleration.
  */
 
-import { MiniGameType } from '../types';
 import { soundEngine } from '../audio/SoundEngine';
+
+export interface Alien {
+  x: number;
+  y: number;
+  vx: number;
+  row: number;
+  hp: number;
+  maxHp: number;
+  alive: boolean;
+  color: string;
+  isArmored?: boolean;
+  isBoss?: boolean;
+  scoreValue: number;
+  width: number;
+  height: number;
+}
 
 export class MiniGameEngine {
   public canvas: HTMLCanvasElement;
   public ctx: CanvasRenderingContext2D;
-  public currentType: MiniGameType = 'flappy';
   public score: number = 0;
   public highScore: number = 0;
+  public level: number = 1;
   public isGameOver: boolean = false;
-  public onActionSuccess?: () => void; // reduces boredom in main game
+  public isPaused: boolean = false;
+  public isLevelClear: boolean = false;
+  public levelClearTimer: number = 0;
+  public levelTitle: string = '';
+
+  public onActionSuccess?: () => void; // reduces boredom
+  public onLevelUp?: (level: number) => void;
 
   // Input state
   public dpadLeft: boolean = false;
@@ -27,35 +55,17 @@ export class MiniGameEngine {
   private height = 160;
   private frameCount = 0;
 
-  // Flappy State
-  private flappy = {
-    y: 80,
-    vy: 0,
-    gravity: 0.28,
-    jump: -4.2,
-    pipes: [] as { x: number; top: number; bottom: number; passed: boolean }[],
-    pipeTimer: 0,
-  };
-
-  // Space Shooter State
+  // Space Shooter State - Accelerated arcade pacing
   private space = {
     playerX: 120,
-    playerSpeed: 3.2,
+    playerSpeed: 5.8,
     bullets: [] as { x: number; y: number }[],
-    aliens: [] as { x: number; y: number; vx: number; type: number; alive: boolean }[],
-    alienSpawnTimer: 0,
+    alienBombs: [] as { x: number; y: number; vx?: number }[],
+    aliens: [] as Alien[],
+    boss: null as Alien | null,
+    totalWaveAliens: 12,
+    alienDropTimer: 0,
     particles: [] as { x: number; y: number; vx: number; vy: number; life: number; color: string }[],
-  };
-
-  // Maze State
-  private maze = {
-    x: 120,
-    y: 80,
-    dirX: 0,
-    dirY: 0,
-    dots: [] as { x: number; y: number; eaten: boolean }[],
-    ghosts: [] as { x: number; y: number; vx: number; vy: number; color: string }[],
-    powerTimer: 0,
   };
 
   constructor() {
@@ -63,102 +73,259 @@ export class MiniGameEngine {
     this.canvas.width = this.width;
     this.canvas.height = this.height;
     this.ctx = this.canvas.getContext('2d')!;
-    this.reset();
+    this.reset(true);
     this.update(0.016);
   }
 
-  public setGameType(type: MiniGameType) {
-    this.currentType = type;
-    this.reset();
+  public setPaused(paused: boolean) {
+    if (this.isPaused !== paused) {
+      this.isPaused = paused;
+      this.render();
+    }
   }
 
-  public reset() {
+  /**
+   * Resets the game.
+   * @param keepLevel - If true, restarts the CURRENT LEVEL without sending player back to level 1.
+   */
+  public reset(keepLevel: boolean = true) {
     this.isGameOver = false;
-    this.score = 0;
-    this.frameCount = 0;
+    this.isLevelClear = false;
+    this.levelClearTimer = 0;
 
-    if (this.currentType === 'flappy') {
-      this.flappy.y = 80;
-      this.flappy.vy = 0;
-      this.flappy.pipes = [
-        { x: 260, top: 40, bottom: 90, passed: false },
-        { x: 380, top: 55, bottom: 105, passed: false },
-      ];
-      this.flappy.pipeTimer = 0;
-    } else if (this.currentType === 'space') {
-      this.space.playerX = 120;
-      this.space.bullets = [];
-      this.space.aliens = [];
-      this.space.particles = [];
-      this.space.alienSpawnTimer = 0;
-      // Initial wave of aliens
-      for (let row = 0; row < 2; row++) {
-        for (let col = 0; col < 6; col++) {
+    if (!keepLevel) {
+      this.level = 1;
+      this.score = 0;
+    }
+
+    this.space.playerX = 120;
+    this.space.bullets = [];
+    this.space.alienBombs = [];
+    this.space.particles = [];
+    this.space.alienDropTimer = 0;
+    this.space.boss = null;
+
+    this.spawnAlienWave();
+    this.render();
+  }
+
+  private spawnAlienWave() {
+    this.space.aliens = [];
+    const isBossLevel = this.level % 5 === 0;
+
+    if (isBossLevel) {
+      // --- BOSS LEVEL (Mothership) ---
+      this.levelTitle = `JEFE: NODRIZA ${Math.floor(this.level / 5)}`;
+      const bossHp = 15 + Math.floor(this.level / 5) * 5;
+      const boss: Alien = {
+        x: 120,
+        y: 35,
+        vx: 1.6 + this.level * 0.1,
+        row: 0,
+        hp: bossHp,
+        maxHp: bossHp,
+        alive: true,
+        color: '#f43f5e',
+        isBoss: true,
+        scoreValue: 1000,
+        width: 44,
+        height: 20,
+      };
+      this.space.boss = boss;
+      this.space.aliens.push(boss);
+      this.space.totalWaveAliens = 1;
+
+      // Add 2 escort drones
+      for (let i = -1; i <= 1; i += 2) {
+        this.space.aliens.push({
+          x: 120 + i * 45,
+          y: 55,
+          vx: 1.8,
+          row: 1,
+          hp: 1,
+          maxHp: 1,
+          alive: true,
+          color: '#38bdf8',
+          scoreValue: 40,
+          width: 14,
+          height: 8,
+        });
+      }
+      this.space.totalWaveAliens = 3;
+      return;
+    }
+
+    // Determine layout variation based on level
+    const variation = (this.level - 1) % 4; // 0, 1, 2, 3
+    const baseSpeed = 1.8 + (this.level - 1) * 0.35;
+
+    if (variation === 0) {
+      // Variation 1: Classic Grid Formation
+      this.levelTitle = `NIVEL ${this.level}: INVASIÓN`;
+      const rows = 2;
+      const cols = 6;
+      this.space.totalWaveAliens = rows * cols;
+      const rowColors = ['#f43f5e', '#ec4899'];
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
           this.space.aliens.push({
-            x: 40 + col * 28,
-            y: 25 + row * 22,
-            vx: 0.8,
-            type: row,
+            x: 35 + c * 30,
+            y: 24 + r * 18,
+            vx: baseSpeed,
+            row: r,
+            hp: 1,
+            maxHp: 1,
             alive: true,
+            color: rowColors[r % rowColors.length],
+            scoreValue: 20,
+            width: 14,
+            height: 8,
           });
         }
       }
-    } else if (this.currentType === 'maze') {
-      this.maze.x = 120;
-      this.maze.y = 80;
-      this.maze.dirX = 0;
-      this.maze.dirY = 0;
-      this.maze.powerTimer = 0;
-      this.maze.dots = [];
-      for (let x = 20; x < 225; x += 18) {
-        for (let y = 25; y < 145; y += 18) {
-          this.maze.dots.push({ x, y, eaten: false });
+    } else if (variation === 1) {
+      // Variation 2: V-Formation (Arrowhead)
+      this.levelTitle = `NIVEL ${this.level}: PUNTA DE FLECHA`;
+      const vOffsets = [
+        { c: 0, r: 0 },
+        { c: -1, r: 1 }, { c: 1, r: 1 },
+        { c: -2, r: 2 }, { c: 2, r: 2 },
+        { c: -3, r: 3 }, { c: 3, r: 3 },
+        { c: -1, r: 2 }, { c: 1, r: 2 },
+        { c: -2, r: 3 }, { c: 2, r: 3 },
+      ];
+      this.space.totalWaveAliens = vOffsets.length;
+
+      for (const off of vOffsets) {
+        this.space.aliens.push({
+          x: 120 + off.c * 24,
+          y: 22 + off.r * 15,
+          vx: baseSpeed * 1.1,
+          row: off.r,
+          hp: 1,
+          maxHp: 1,
+          alive: true,
+          color: '#facc15',
+          scoreValue: 25,
+          width: 14,
+          height: 8,
+        });
+      }
+    } else if (variation === 2) {
+      // Variation 3: Armored Mechs (Front row has 2 HP with shields!)
+      this.levelTitle = `NIVEL ${this.level}: MECHS BLINDADOS`;
+      const rows = 3;
+      const cols = 5;
+      this.space.totalWaveAliens = rows * cols;
+
+      for (let r = 0; r < rows; r++) {
+        const isArmored = r === rows - 1; // front row armored
+        for (let c = 0; c < cols; c++) {
+          this.space.aliens.push({
+            x: 45 + c * 34,
+            y: 24 + r * 18,
+            vx: baseSpeed * 0.95,
+            row: r,
+            hp: isArmored ? 2 : 1,
+            maxHp: isArmored ? 2 : 1,
+            alive: true,
+            isArmored,
+            color: isArmored ? '#38bdf8' : '#a855f7',
+            scoreValue: isArmored ? 50 : 25,
+            width: isArmored ? 16 : 14,
+            height: isArmored ? 10 : 8,
+          });
         }
       }
-      this.maze.ghosts = [
-        { x: 40, y: 40, vx: 1.2, vy: 0, color: '#ff3366' },
-        { x: 200, y: 120, vx: -1.2, vy: 0, color: '#33ccff' },
-        { x: 120, y: 130, vx: 0, vy: -1.2, color: '#ffaa00' },
-      ];
+    } else {
+      // Variation 4: Split Flanks (Twin Columns)
+      this.levelTitle = `NIVEL ${this.level}: FLANCOS DOBLES`;
+      this.space.totalWaveAliens = 12;
+
+      // Left squad
+      for (let r = 0; r < 3; r++) {
+        for (let c = 0; c < 2; c++) {
+          this.space.aliens.push({
+            x: 25 + c * 24,
+            y: 22 + r * 16,
+            vx: baseSpeed * 1.15,
+            row: r,
+            hp: 1,
+            maxHp: 1,
+            alive: true,
+            color: '#ec4899',
+            scoreValue: 30,
+            width: 14,
+            height: 8,
+          });
+        }
+      }
+      // Right squad
+      for (let r = 0; r < 3; r++) {
+        for (let c = 0; c < 2; c++) {
+          this.space.aliens.push({
+            x: 185 + c * 24,
+            y: 22 + r * 16,
+            vx: -baseSpeed * 1.15,
+            row: r,
+            hp: 1,
+            maxHp: 1,
+            alive: true,
+            color: '#10b981',
+            scoreValue: 30,
+            width: 14,
+            height: 8,
+          });
+        }
+      }
     }
-    this.render();
   }
 
   public triggerActionA() {
     if (this.isGameOver) {
-      this.reset();
+      // Keep level on restart in the console minigame!
+      this.reset(true);
       return;
     }
 
-    if (this.currentType === 'flappy') {
-      this.flappy.vy = this.flappy.jump;
-      soundEngine.playRetroJump();
+    if (this.isPaused) return;
+
+    // Fire laser beam with rapid response
+    if (this.space.bullets.length < 5) {
+      this.space.bullets.push({ x: this.space.playerX, y: 135 });
+      soundEngine.playRetroShoot();
       this.onActionSuccess?.();
-    } else if (this.currentType === 'space') {
-      // Fire bullet
-      if (this.space.bullets.length < 5) {
-        this.space.bullets.push({ x: this.space.playerX, y: 135 });
-        soundEngine.playRetroShoot();
-        this.onActionSuccess?.();
-      }
     }
   }
 
   public update(dt: number) {
     this.frameCount++;
 
+    if (this.isPaused) {
+      this.render();
+      return;
+    }
+
     if (this.isGameOver) {
       this.render();
       return;
     }
 
-    if (this.currentType === 'flappy') {
-      this.updateFlappy();
-    } else if (this.currentType === 'space') {
-      this.updateSpace();
-    } else if (this.currentType === 'maze') {
-      this.updateMaze();
+    // Level Clear Transition
+    if (this.isLevelClear) {
+      this.levelClearTimer -= dt;
+      if (this.levelClearTimer <= 0) {
+        this.isLevelClear = false;
+        this.level++;
+        this.onLevelUp?.(this.level);
+        this.reset(true); // advance to next level!
+      }
+      this.render();
+      return;
     }
+
+    this.updateSpace(dt);
 
     if (this.score > this.highScore) {
       this.highScore = this.score;
@@ -167,66 +334,8 @@ export class MiniGameEngine {
     this.render();
   }
 
-  // --- FLAPPY MINI-GAME ---
-  private updateFlappy() {
-    this.flappy.vy += this.flappy.gravity;
-    this.flappy.y += this.flappy.vy;
-
-    // Floor and ceiling
-    if (this.flappy.y > 146) {
-      this.flappy.y = 146;
-      this.gameOver();
-      return;
-    }
-    if (this.flappy.y < 8) {
-      this.flappy.y = 8;
-      this.flappy.vy = 0;
-    }
-
-    // Move pipes
-    for (const pipe of this.flappy.pipes) {
-      pipe.x -= 1.8;
-
-      // Check collision
-      const birdX = 50;
-      const birdSize = 7;
-      if (
-        birdX + birdSize > pipe.x &&
-        birdX - birdSize < pipe.x + 22
-      ) {
-        if (this.flappy.y - birdSize < pipe.top || this.flappy.y + birdSize > pipe.bottom) {
-          this.gameOver();
-          return;
-        }
-      }
-
-      // Score
-      if (!pipe.passed && pipe.x + 22 < birdX) {
-        pipe.passed = true;
-        this.score += 10;
-        soundEngine.playRetroCoin();
-        this.onActionSuccess?.();
-      }
-    }
-
-    // Recycle pipes
-    if (this.flappy.pipes.length > 0 && this.flappy.pipes[0].x < -30) {
-      this.flappy.pipes.shift();
-      const lastX = this.flappy.pipes[this.flappy.pipes.length - 1]?.x || 240;
-      const top = 25 + Math.random() * 50;
-      const gap = 46;
-      this.flappy.pipes.push({
-        x: lastX + 120,
-        top,
-        bottom: top + gap,
-        passed: false,
-      });
-    }
-  }
-
-  // --- SPACE SHOOTER MINI-GAME ---
-  private updateSpace() {
-    // Player movement
+  private updateSpace(dt: number) {
+    // Player controls
     if (this.dpadLeft && this.space.playerX > 14) {
       this.space.playerX -= this.space.playerSpeed;
     }
@@ -234,77 +343,137 @@ export class MiniGameEngine {
       this.space.playerX += this.space.playerSpeed;
     }
 
-    // Bullets
+    // Player bullets
     for (let i = this.space.bullets.length - 1; i >= 0; i--) {
       const b = this.space.bullets[i];
-      b.y -= 5;
-      if (b.y < -10) {
+      b.y -= 8.5; // Rapid laser travel
+      if (b.y < 12) {
         this.space.bullets.splice(i, 1);
         continue;
       }
 
-      // Check hit with aliens
+      // Hit aliens
       for (const alien of this.space.aliens) {
-        if (alien.alive && Math.abs(b.x - alien.x) < 12 && Math.abs(b.y - alien.y) < 10) {
-          alien.alive = false;
+        if (
+          alien.alive &&
+          Math.abs(b.x - alien.x) < alien.width / 2 + 3 &&
+          Math.abs(b.y - alien.y) < alien.height / 2 + 4
+        ) {
+          alien.hp--;
           this.space.bullets.splice(i, 1);
-          this.score += 25;
-          soundEngine.playRetroExplosion();
-          this.onActionSuccess?.();
 
-          // Spawn explosion particles
-          for (let p = 0; p < 8; p++) {
-            const angle = Math.random() * Math.PI * 2;
-            const speed = 1 + Math.random() * 2;
-            this.space.particles.push({
-              x: alien.x,
-              y: alien.y,
-              vx: Math.cos(angle) * speed,
-              vy: Math.sin(angle) * speed,
-              life: 18,
-              color: '#ffcc00',
-            });
+          if (alien.hp <= 0) {
+            alien.alive = false;
+            this.score += alien.scoreValue;
+            soundEngine.playRetroExplosion();
+            this.onActionSuccess?.();
+
+            // Big particles for boss, normal for aliens
+            const count = alien.isBoss ? 24 : 8;
+            for (let p = 0; p < count; p++) {
+              const angle = Math.random() * Math.PI * 2;
+              const speed = 1.2 + Math.random() * 3.2;
+              this.space.particles.push({
+                x: alien.x,
+                y: alien.y,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                life: alien.isBoss ? 24 : 14,
+                color: alien.color,
+              });
+            }
+          } else {
+            // Damaged but still alive (Armored or Boss)
+            soundEngine.triggerHaptic(15);
+            this.score += 10;
+            this.onActionSuccess?.();
           }
           break;
         }
       }
     }
 
-    // Move aliens
+    // Check living aliens count
     let changeDir = false;
+    let livingAliensCount = 0;
+
+    for (const alien of this.space.aliens) {
+      if (alien.alive) livingAliensCount++;
+    }
+
+    // Check Victory / Wave cleared!
+    if (livingAliensCount === 0 && !this.isLevelClear) {
+      this.isLevelClear = true;
+      this.levelClearTimer = 1.4;
+      this.score += 250 * this.level;
+      soundEngine.playRetroCoin();
+      return;
+    }
+
+    // Dynamic speed boost multiplier when fewer aliens remain
+    const speedBoost = 1.0 + (1 - livingAliensCount / Math.max(1, this.space.totalWaveAliens)) * 1.1;
+
     for (const alien of this.space.aliens) {
       if (!alien.alive) continue;
-      alien.x += alien.vx;
-      if (alien.x > this.width - 20 || alien.x < 20) {
+      alien.x += alien.vx * speedBoost;
+      if (alien.x > this.width - alien.width / 2 - 4 || alien.x < alien.width / 2 + 4) {
         changeDir = true;
       }
     }
+
+    // Bounce and step downwards
     if (changeDir) {
+      const dropAmount = this.space.boss ? 2 : 5;
       for (const alien of this.space.aliens) {
         alien.vx *= -1;
-        alien.y += 6;
-        if (alien.alive && alien.y > 130) {
-          this.gameOver();
+        alien.y += dropAmount;
+        if (alien.alive && alien.y > 132) {
+          // Reached player level: Game over in minigame
+          this.isGameOver = true;
+          soundEngine.playRetroExplosion();
           return;
         }
       }
     }
 
-    // Respawn wave if all dead
-    if (this.space.aliens.every((a) => !a.alive)) {
-      for (let row = 0; row < 2; row++) {
-        for (let col = 0; col < 6; col++) {
-          this.space.aliens.push({
-            x: 40 + col * 28,
-            y: 20 + row * 22,
-            vx: (Math.random() > 0.5 ? 1 : -1) * 1.1,
-            type: Math.floor(Math.random() * 2),
-            alive: true,
-          });
+    // Alien bombs / Boss triple cannons
+    this.space.alienDropTimer += dt;
+    const isBoss = !!this.space.boss?.alive;
+    const bombInterval = isBoss ? 0.7 : Math.max(0.4, 1.4 - this.level * 0.15);
+
+    if (this.space.alienDropTimer > bombInterval) {
+      this.space.alienDropTimer = 0;
+      if (isBoss && this.space.boss) {
+        // Boss fires 3 spread orbs!
+        this.space.alienBombs.push({ x: this.space.boss.x - 12, y: this.space.boss.y + 10, vx: -0.6 });
+        this.space.alienBombs.push({ x: this.space.boss.x, y: this.space.boss.y + 12, vx: 0 });
+        this.space.alienBombs.push({ x: this.space.boss.x + 12, y: this.space.boss.y + 10, vx: 0.6 });
+      } else {
+        const aliveAliens = this.space.aliens.filter((a) => a.alive);
+        if (aliveAliens.length > 0) {
+          const shooter = aliveAliens[Math.floor(Math.random() * aliveAliens.length)];
+          this.space.alienBombs.push({ x: shooter.x, y: shooter.y + 6, vx: 0 });
         }
       }
-      this.score += 100;
-      soundEngine.playRetroCoin();
+    }
+
+    // Update alien bombs
+    for (let i = this.space.alienBombs.length - 1; i >= 0; i--) {
+      const bomb = this.space.alienBombs[i];
+      bomb.y += 3.8 + this.level * 0.3;
+      if (bomb.vx) bomb.x += bomb.vx;
+
+      if (bomb.y > this.height || bomb.x < 0 || bomb.x > this.width) {
+        this.space.alienBombs.splice(i, 1);
+        continue;
+      }
+
+      // Check hit with player
+      if (Math.abs(bomb.x - this.space.playerX) < 10 && Math.abs(bomb.y - 140) < 8) {
+        this.isGameOver = true;
+        soundEngine.playRetroExplosion();
+        return;
+      }
     }
 
     // Update particles
@@ -319,204 +488,55 @@ export class MiniGameEngine {
     }
   }
 
-  // --- MAZE MINI-GAME ---
-  private updateMaze() {
-    if (this.dpadLeft) {
-      this.maze.dirX = -1.8;
-      this.maze.dirY = 0;
-    } else if (this.dpadRight) {
-      this.maze.dirX = 1.8;
-      this.maze.dirY = 0;
-    } else if (this.dpadUp) {
-      this.maze.dirX = 0;
-      this.maze.dirY = -1.8;
-    } else if (this.dpadDown) {
-      this.maze.dirX = 0;
-      this.maze.dirY = 1.8;
-    }
-
-    this.maze.x += this.maze.dirX;
-    this.maze.y += this.maze.dirY;
-
-    // Boundaries
-    this.maze.x = Math.max(12, Math.min(this.width - 12, this.maze.x));
-    this.maze.y = Math.max(20, Math.min(this.height - 14, this.maze.y));
-
-    // Eat dots
-    for (const dot of this.maze.dots) {
-      if (!dot.eaten && Math.abs(this.maze.x - dot.x) < 8 && Math.abs(this.maze.y - dot.y) < 8) {
-        dot.eaten = true;
-        this.score += 5;
-        this.onActionSuccess?.();
-        if (Math.random() < 0.25) {
-          soundEngine.playRetroCoin();
-        }
-      }
-    }
-
-    // Move ghosts
-    for (const ghost of this.maze.ghosts) {
-      ghost.x += ghost.vx;
-      ghost.y += ghost.vy;
-
-      if (ghost.x < 20 || ghost.x > this.width - 20) ghost.vx *= -1;
-      if (ghost.y < 25 || ghost.y > this.height - 25) ghost.vy *= -1;
-
-      // Touch ghost
-      if (Math.abs(this.maze.x - ghost.x) < 10 && Math.abs(this.maze.y - ghost.y) < 10) {
-        this.gameOver();
-        return;
-      }
-    }
-
-    // Reset dots if all eaten
-    if (this.maze.dots.every((d) => d.eaten)) {
-      this.maze.dots.forEach((d) => (d.eaten = false));
-      this.score += 150;
-      soundEngine.playRetroCoin();
-    }
-  }
-
-  private gameOver() {
-    this.isGameOver = true;
-    soundEngine.playRetroExplosion();
-  }
-
-  // --- RENDERING ON CANVAS ---
+  // --- RENDERING CANVAS ---
   private render() {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.width, this.height);
 
-    // Screen background (retro LCD tint)
-    ctx.fillStyle = '#0f172a';
+    // Deep space background
+    ctx.fillStyle = '#060a17';
     ctx.fillRect(0, 0, this.width, this.height);
 
-    if (this.currentType === 'flappy') {
-      this.renderFlappy(ctx);
-    } else if (this.currentType === 'space') {
-      this.renderSpace(ctx);
-    } else if (this.currentType === 'maze') {
-      this.renderMaze(ctx);
+    // Starfield
+    ctx.fillStyle = '#ffffff';
+    for (let i = 0; i < 24; i++) {
+      const sx = (i * 41 + (this.isPaused ? 0 : this.frameCount * 0.3)) % this.width;
+      const sy = (i * 59) % (this.height - 20) + 16;
+      ctx.fillRect(sx, sy, 1.2, 1.2);
     }
 
-    // Top status bar
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    // Top status bar: Level & Score
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
     ctx.fillRect(0, 0, this.width, 14);
 
     ctx.fillStyle = '#38bdf8';
     ctx.font = '8px "Press Start 2P", monospace, sans-serif';
-    ctx.fillText(`SCORE:${this.score}`, 4, 10);
+    ctx.fillText(`LVL:${this.level}`, 4, 10);
+
+    ctx.fillStyle = '#fde047';
+    ctx.fillText(`PTS:${this.score}`, 70, 10);
 
     ctx.fillStyle = '#f59e0b';
     ctx.fillText(`HI:${this.highScore}`, 165, 10);
 
-    // Scanlines & CRT vignette overlay for retro feel
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
-    for (let y = 0; y < this.height; y += 2) {
-      ctx.fillRect(0, y, this.width, 1);
-    }
-
-    if (this.isGameOver) {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
-      ctx.fillRect(20, 45, this.width - 40, 70);
-
+    // Boss Health Bar (if active)
+    if (this.space.boss && this.space.boss.alive) {
+      const b = this.space.boss;
+      const barW = 100;
+      const barH = 4;
+      const bx = (this.width - barW) / 2;
+      const by = 16;
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(bx, by, barW, barH);
+      const fillW = Math.max(0, (b.hp / b.maxHp) * barW);
       ctx.fillStyle = '#ef4444';
-      ctx.font = '10px "Press Start 2P", monospace, sans-serif';
+      ctx.fillRect(bx, by, fillW, barH);
+
+      ctx.fillStyle = '#f87171';
+      ctx.font = '6px "Press Start 2P", monospace, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('GAME OVER', this.width / 2, 72);
-
-      ctx.fillStyle = '#e2e8f0';
-      ctx.font = '7px "Press Start 2P", monospace, sans-serif';
-      ctx.fillText('PULSA A / TAP', this.width / 2, 95);
+      ctx.fillText(`JEFE HP: ${b.hp}/${b.maxHp}`, this.width / 2, 26);
       ctx.textAlign = 'left';
-    }
-  }
-
-  private renderFlappy(ctx: CanvasRenderingContext2D) {
-    // Sky gradient & clouds
-    ctx.fillStyle = '#0284c7';
-    ctx.fillRect(0, 14, this.width, this.height - 24);
-
-    // Clouds
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-    ctx.beginPath();
-    ctx.arc(60, 40, 14, 0, Math.PI * 2);
-    ctx.arc(80, 36, 18, 0, Math.PI * 2);
-    ctx.arc(100, 40, 14, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Pipes
-    for (const pipe of this.flappy.pipes) {
-      ctx.fillStyle = '#22c55e';
-      ctx.strokeStyle = '#15803d';
-      ctx.lineWidth = 2;
-
-      // Top pipe
-      ctx.fillRect(pipe.x, 0, 22, pipe.top);
-      ctx.strokeRect(pipe.x, 0, 22, pipe.top);
-      ctx.fillRect(pipe.x - 2, pipe.top - 8, 26, 8);
-      ctx.strokeRect(pipe.x - 2, pipe.top - 8, 26, 8);
-
-      // Bottom pipe
-      ctx.fillRect(pipe.x, pipe.bottom, 22, this.height - pipe.bottom);
-      ctx.strokeRect(pipe.x, pipe.bottom, 22, this.height - pipe.bottom);
-      ctx.fillRect(pipe.x - 2, pipe.bottom, 26, 8);
-      ctx.strokeRect(pipe.x - 2, pipe.bottom, 26, 8);
-    }
-
-    // Ground
-    ctx.fillStyle = '#854d0e';
-    ctx.fillRect(0, this.height - 12, this.width, 12);
-    ctx.fillStyle = '#16a34a';
-    ctx.fillRect(0, this.height - 12, this.width, 3);
-
-    // Flappy bird
-    ctx.save();
-    ctx.translate(50, this.flappy.y);
-    const rot = Math.min(Math.PI / 4, Math.max(-Math.PI / 4, this.flappy.vy * 0.12));
-    ctx.rotate(rot);
-
-    // Body
-    ctx.fillStyle = '#facc15';
-    ctx.beginPath();
-    ctx.arc(0, 0, 7, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Wing
-    ctx.fillStyle = '#eab308';
-    ctx.beginPath();
-    ctx.ellipse(-2, Math.sin(this.frameCount * 0.4) * 2, 4, 2, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Eye
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.arc(3, -2, 2.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#000000';
-    ctx.beginPath();
-    ctx.arc(4, -2, 1, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Beak
-    ctx.fillStyle = '#ea580c';
-    ctx.beginPath();
-    ctx.moveTo(5, -1);
-    ctx.lineTo(10, 1);
-    ctx.lineTo(5, 3);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.restore();
-  }
-
-  private renderSpace(ctx: CanvasRenderingContext2D) {
-    // Stars
-    ctx.fillStyle = '#ffffff';
-    for (let i = 0; i < 20; i++) {
-      const sx = (i * 37 + this.frameCount * 0.5) % this.width;
-      const sy = (i * 53) % (this.height - 20) + 16;
-      ctx.fillRect(sx, sy, 1.2, 1.2);
     }
 
     // Player ship
@@ -530,27 +550,70 @@ export class MiniGameEngine {
     ctx.closePath();
     ctx.fill();
 
-    // Engine glow
+    // Engine thruster glow
     ctx.fillStyle = '#f97316';
-    ctx.fillRect(px - 2, 145, 4, 3 + Math.sin(this.frameCount * 0.8) * 2);
+    const thruster = this.isPaused ? 3 : 3 + Math.sin(this.frameCount * 0.8) * 2;
+    ctx.fillRect(px - 2, 145, 4, thruster);
 
-    // Bullets
-    ctx.fillStyle = '#fde047';
+    // Player bullets
+    ctx.fillStyle = '#38bdf8';
     for (const b of this.space.bullets) {
       ctx.fillRect(b.x - 1.5, b.y, 3, 7);
     }
 
-    // Aliens
+    // Alien bombs
+    ctx.fillStyle = '#ef4444';
+    for (const bomb of this.space.alienBombs) {
+      ctx.beginPath();
+      ctx.arc(bomb.x, bomb.y, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Aliens & Boss Rendering
     for (const a of this.space.aliens) {
       if (!a.alive) continue;
-      ctx.fillStyle = a.type === 0 ? '#ec4899' : '#a855f7';
-      // Retro alien shape
-      ctx.fillRect(a.x - 7, a.y - 4, 14, 8);
-      ctx.fillRect(a.x - 9, a.y - 2, 18, 4);
-      // Eyes
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(a.x - 4, a.y - 2, 2, 2);
-      ctx.fillRect(a.x + 2, a.y - 2, 2, 2);
+
+      if (a.isBoss) {
+        // --- BOSS MOTHERSHIP ---
+        ctx.fillStyle = a.color;
+        // Central massive hull
+        ctx.fillRect(a.x - 22, a.y - 8, 44, 16);
+        ctx.fillRect(a.x - 14, a.y - 12, 28, 4);
+        ctx.fillRect(a.x - 8, a.y + 8, 16, 4);
+        // Wings
+        ctx.fillStyle = '#dc2626';
+        ctx.fillRect(a.x - 26, a.y - 4, 6, 8);
+        ctx.fillRect(a.x + 20, a.y - 4, 6, 8);
+        // Glowing Core
+        ctx.fillStyle = '#fde047';
+        ctx.fillRect(a.x - 4, a.y - 2, 8, 6);
+      } else if (a.isArmored) {
+        // --- ARMORED MECH ---
+        ctx.fillStyle = a.color;
+        ctx.fillRect(a.x - 8, a.y - 5, 16, 10);
+        // Shield outline
+        ctx.strokeStyle = a.hp > 1 ? '#67e8f9' : '#f97316';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(a.x - 9, a.y - 6, 18, 12);
+        // Eyes
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(a.x - 4, a.y - 2, 2, 2);
+        ctx.fillRect(a.x + 2, a.y - 2, 2, 2);
+      } else {
+        // --- STANDARD INVADER ---
+        ctx.fillStyle = a.color;
+        ctx.fillRect(a.x - 7, a.y - 4, 14, 8);
+        ctx.fillRect(a.x - 9, a.y - 2, 18, 4);
+        // Antennae & claws
+        ctx.fillRect(a.x - 6, a.y - 6, 2, 2);
+        ctx.fillRect(a.x + 4, a.y - 6, 2, 2);
+        ctx.fillRect(a.x - 8, a.y + 4, 3, 2);
+        ctx.fillRect(a.x + 5, a.y + 4, 3, 2);
+        // White eyes
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(a.x - 4, a.y - 2, 2, 2);
+        ctx.fillRect(a.x + 2, a.y - 2, 2, 2);
+      }
     }
 
     // Particles
@@ -558,43 +621,67 @@ export class MiniGameEngine {
       ctx.fillStyle = p.color;
       ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
     }
-  }
 
-  private renderMaze(ctx: CanvasRenderingContext2D) {
-    // Grid dots
-    ctx.fillStyle = '#fbbf24';
-    for (const dot of this.maze.dots) {
-      if (!dot.eaten) {
-        ctx.fillRect(dot.x - 1, dot.y - 1, 2.5, 2.5);
-      }
+    // Scanlines
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+    for (let y = 0; y < this.height; y += 2) {
+      ctx.fillRect(0, y, this.width, 1);
     }
 
-    // Player
-    ctx.fillStyle = '#eab308';
-    ctx.beginPath();
-    ctx.arc(this.maze.x, this.maze.y, 6, 0.2 * Math.PI, 1.8 * Math.PI);
-    ctx.lineTo(this.maze.x, this.maze.y);
-    ctx.fill();
+    // --- PAUSE OVERLAY ---
+    if (this.isPaused && !this.isGameOver && !this.isLevelClear) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(30, 55, this.width - 60, 45);
 
-    // Ghosts
-    for (const g of this.maze.ghosts) {
-      ctx.fillStyle = g.color;
-      ctx.beginPath();
-      ctx.arc(g.x, g.y - 2, 6, Math.PI, 0, false);
-      ctx.lineTo(g.x + 6, g.y + 6);
-      ctx.lineTo(g.x + 2, g.y + 4);
-      ctx.lineTo(g.x - 2, g.y + 6);
-      ctx.lineTo(g.x - 6, g.y + 4);
-      ctx.closePath();
-      ctx.fill();
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(30, 55, this.width - 60, 45);
 
-      // Ghost eyes
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(g.x - 4, g.y - 4, 2.5, 2.5);
-      ctx.fillRect(g.x + 1.5, g.y - 4, 2.5, 2.5);
-      ctx.fillStyle = '#0f172a';
-      ctx.fillRect(g.x - 3, g.y - 3, 1.5, 1.5);
-      ctx.fillRect(g.x + 2.5, g.y - 3, 1.5, 1.5);
+      ctx.fillStyle = '#fde047';
+      ctx.font = '10px "Press Start 2P", monospace, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('[ PAUSA ]', this.width / 2, 75);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '6px "Press Start 2P", monospace, sans-serif';
+      ctx.fillText('MIRA ABAJO PARA REANUDAR', this.width / 2, 90);
+      ctx.textAlign = 'left';
+    }
+
+    // --- LEVEL CLEAR BANNER ---
+    if (this.isLevelClear) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+      ctx.fillRect(20, 50, this.width - 40, 55);
+
+      ctx.fillStyle = '#4ade80';
+      ctx.font = '9px "Press Start 2P", monospace, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('¡NIVEL SUPERADO!', this.width / 2, 70);
+
+      ctx.fillStyle = '#fde047';
+      ctx.font = '7px "Press Start 2P", monospace, sans-serif';
+      ctx.fillText(`SIGUIENTE: NIVEL ${this.level + 1}`, this.width / 2, 90);
+      ctx.textAlign = 'left';
+    }
+
+    // --- GAME OVER IN CONSOLE BANNER ---
+    if (this.isGameOver) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+      ctx.fillRect(20, 45, this.width - 40, 68);
+
+      ctx.fillStyle = '#ef4444';
+      ctx.font = '10px "Press Start 2P", monospace, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('NAVE DESTRUIDA', this.width / 2, 68);
+
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = '7px "Press Start 2P", monospace, sans-serif';
+      ctx.fillText(`REINTENTAR NIVEL ${this.level}`, this.width / 2, 85);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '6px "Press Start 2P", monospace, sans-serif';
+      ctx.fillText('PULSA A / TAP', this.width / 2, 99);
+      ctx.textAlign = 'left';
     }
   }
 }

@@ -54,14 +54,24 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
         </p>
 
         {/* Stats Grid */}
-        <div className="my-5 grid grid-cols-3 gap-2 rounded-2xl bg-slate-900/60 p-3 border border-slate-800 text-left font-sans-modern">
+        <div className="my-5 grid grid-cols-4 gap-2 rounded-2xl bg-slate-900/60 p-3 border border-slate-800 text-left font-sans-modern">
           <div>
             <div className="flex items-center gap-1 text-[10px] text-slate-400">
               <Clock className="h-3 w-3 text-rose-400" />
               Hora
             </div>
-            <div className="font-pixel text-[11px] text-white mt-1">
+            <div className="font-pixel text-[10px] text-white mt-1">
               {stats.currentHour === 0 ? '12 AM' : `${stats.currentHour} AM`}
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center gap-1 text-[10px] text-slate-400">
+              <Award className="h-3 w-3 text-cyan-400" />
+              Nivel
+            </div>
+            <div className="font-pixel text-[10px] text-cyan-300 mt-1">
+              {stats.level}
             </div>
           </div>
 
@@ -70,7 +80,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
               <Award className="h-3 w-3 text-amber-400" />
               Puntos
             </div>
-            <div className="font-pixel text-[11px] text-amber-300 mt-1">
+            <div className="font-pixel text-[10px] text-amber-300 mt-1">
               {stats.score}
             </div>
           </div>
@@ -80,7 +90,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
               <ShieldCheck className="h-3 w-3 text-emerald-400" />
               Burlados
             </div>
-            <div className="font-pixel text-[11px] text-emerald-300 mt-1">
+            <div className="font-pixel text-[10px] text-emerald-300 mt-1">
               {stats.monstersRepelled}
             </div>
           </div>

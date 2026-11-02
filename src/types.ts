@@ -1,6 +1,6 @@
 export type GameState = 'intro' | 'playing' | 'jumpscare' | 'slept' | 'victory';
 
-export type MiniGameType = 'flappy' | 'space' | 'maze';
+export type MiniGameType = 'space';
 
 export interface SensorStatus {
   gyroscopeAllowed: boolean;
@@ -30,8 +30,10 @@ export interface MonsterState {
 
 export interface GameStats {
   score: number;
+  level: number;
   monstersRepelled: number;
   timeSurvivedMinutes: number;
   currentHour: number; // 0 (12 AM) to 6 (6 AM)
   gameTimeSeconds: number;
 }
+
