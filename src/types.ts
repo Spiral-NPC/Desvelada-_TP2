@@ -1,14 +1,16 @@
 export type GameState = 'intro' | 'playing' | 'jumpscare' | 'slept' | 'victory';
 
+export type GameMode = 'classic' | 'infinite';
+
 export type MiniGameType = 'space';
 
-export interface SensorStatus {
+export type SensorStatus = {
   gyroscopeAllowed: boolean;
   gyroscopeActive: boolean;
   cameraAllowed: boolean;
   cameraActive: boolean;
   hapticsSupported: boolean;
-}
+};
 
 export interface OrientationData {
   alpha: number; // yaw
@@ -16,10 +18,20 @@ export interface OrientationData {
   gamma: number; // roll
 }
 
-export type MonsterLocation = 'closet' | 'door' | 'window' | 'footbed' | 'desk';
+export type MonsterLocation =
+  | 'closet'
+  | 'door'
+  | 'window'
+  | 'footbed'
+  | 'desk'
+  | 'underbed'
+  | 'curtain'
+  | 'ceiling'
+  | 'bookshelf'
+  | 'hallway';
 
-export interface MonsterState {
-  active: boolean;
+export interface ActiveMonster {
+  id: string;
   location: MonsterLocation;
   timer: number;       // time left before attack
   maxTimer: number;    // total time given to feign sleep
@@ -33,7 +45,9 @@ export interface GameStats {
   level: number;
   monstersRepelled: number;
   timeSurvivedMinutes: number;
-  currentHour: number; // 0 (12 AM) to 6 (6 AM)
+  currentHour: number; // 0 (12 AM) to 6 (6 AM) in classic, or ongoing in infinite
   gameTimeSeconds: number;
+  mode: GameMode;
+  highScore: number;
 }
 

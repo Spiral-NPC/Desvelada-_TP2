@@ -17,14 +17,16 @@ import {
   Moon,
   Clock,
   Zap,
+  Infinity as InfinityIcon,
 } from 'lucide-react';
-import { SensorStatus } from '../types';
+import { SensorStatus, GameMode } from '../types';
 
 interface HUDProps {
-  boredom: number; // 0 to 100 (fills in 3 seconds if not playing!)
+  boredom: number; // 0 to 100 (fills in 10 seconds if not playing!)
   timeString: string;
   gameTimeSeconds: number;
   level: number;
+  mode?: GameMode;
   lookingAtConsole: boolean;
   isSleeping: boolean;
   onSleepStart: () => void;
@@ -41,6 +43,7 @@ export const HUD: React.FC<HUDProps> = ({
   boredom,
   timeString,
   level,
+  mode = 'classic',
   lookingAtConsole,
   isSleeping,
   onSleepStart,
@@ -60,7 +63,7 @@ export const HUD: React.FC<HUDProps> = ({
       <div className="flex flex-col items-center gap-1.5 w-full">
         {/* Top bar: Stats and Sensor Badges */}
         <div className="flex w-full items-center justify-between gap-1">
-          {/* Left: Clock & Level */}
+          {/* Left: Clock, Mode & Level */}
           <div className="pointer-events-auto flex items-center gap-1.5">
             <div className="flex items-center gap-1 rounded-xl bg-slate-950/85 px-2.5 py-1 text-white shadow-lg border border-slate-800">
               <Clock className="h-3.5 w-3.5 text-rose-400" />
@@ -68,6 +71,15 @@ export const HUD: React.FC<HUDProps> = ({
                 {timeString}
               </span>
             </div>
+
+            {mode === 'infinite' ? (
+              <div className="flex items-center gap-1 rounded-xl bg-rose-950/90 px-2 py-1 shadow-lg border border-rose-800/70 text-rose-300">
+                <InfinityIcon className="h-3 w-3 text-rose-400" />
+                <span className="font-pixel text-[9px] tracking-wider">
+                  INFINITO
+                </span>
+              </div>
+            ) : null}
 
             <div className="flex items-center gap-1 rounded-xl bg-slate-950/85 px-2 py-1 shadow-lg border border-slate-800">
               <Zap className="h-3 w-3 text-cyan-400" />
@@ -118,7 +130,7 @@ export const HUD: React.FC<HUDProps> = ({
             onPointerDown={onSleepStart}
             onPointerUp={onSleepEnd}
             onPointerLeave={onSleepEnd}
-            className={`w-full flex items-center justify-center gap-2 rounded-2xl px-4 py-2.5 shadow-2xl transition active:scale-95 ${
+            className={`w-full flex items-center justify-center gap-2 rounded-xl px-3 py-1.5 shadow-xl transition active:scale-95 ${
               isSleeping
                 ? 'bg-indigo-600 text-white border-2 border-indigo-300 scale-95 shadow-indigo-500/50'
                 : 'bg-indigo-950/95 hover:bg-indigo-900 text-indigo-100 border border-indigo-500/70 shadow-lg'
@@ -126,19 +138,19 @@ export const HUD: React.FC<HUDProps> = ({
           >
             {isSleeping ? (
               <>
-                <EyeOff className="h-4 w-4 text-indigo-200" />
-                <span className="font-pixel text-[11px] tracking-wider text-indigo-100">
+                <EyeOff className="h-3.5 w-3.5 text-indigo-200" />
+                <span className="font-pixel text-[10px] tracking-wider text-indigo-100">
                   DURMIENDO... (SOLTAR)
                 </span>
               </>
             ) : (
               <>
-                <Moon className="h-4 w-4 text-indigo-300" />
-                <div className="flex flex-col items-center">
-                  <span className="font-pixel text-[10px] tracking-wider text-white">
+                <Moon className="h-3.5 w-3.5 text-indigo-300" />
+                <div className="flex flex-col items-center leading-none">
+                  <span className="font-pixel text-[9px] tracking-wider text-white">
                     MANTÉN: FINGIR DORMIR
                   </span>
-                  <span className="text-[8px] text-indigo-300/80 font-sans-modern">
+                  <span className="text-[7.5px] text-indigo-300/80 font-sans-modern mt-0.5">
                     Tapa tus ojos con la frazada
                   </span>
                 </div>
@@ -147,14 +159,14 @@ export const HUD: React.FC<HUDProps> = ({
           </button>
 
           {/* Sleep / Boredom Meter right under sleep button */}
-          <div className="mt-1.5 w-full rounded-xl bg-slate-950/90 px-3 py-1 shadow-lg border border-slate-800">
-            <div className="flex items-center justify-between text-[9px] uppercase font-sans-modern font-semibold">
+          <div className="mt-1 w-full rounded-lg bg-slate-950/90 px-2.5 py-1 shadow-md border border-slate-800">
+            <div className="flex items-center justify-between text-[8px] uppercase font-sans-modern font-semibold">
               <span className="flex items-center gap-1 text-slate-300">
-                <Moon className="h-2.5 w-2.5 text-indigo-400" />
-                Sueño (3s sin jugar):
+                <Moon className="h-2 w-2 text-indigo-400" />
+                Sueño (10s sin jugar):
               </span>
               <span
-                className={`font-pixel text-[9px] ${
+                className={`font-pixel text-[8px] ${
                   isHighBoredom ? 'text-red-400 animate-pulse' : 'text-cyan-400'
                 }`}
               >
@@ -162,7 +174,7 @@ export const HUD: React.FC<HUDProps> = ({
               </span>
             </div>
             {/* Rapid progress bar */}
-            <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
+            <div className="mt-0.5 h-1 w-full overflow-hidden rounded-full bg-slate-800">
               <div
                 className={`h-full transition-all duration-150 ${
                   isHighBoredom

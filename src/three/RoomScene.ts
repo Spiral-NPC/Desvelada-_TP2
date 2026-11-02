@@ -8,6 +8,19 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { MiniGameEngine } from '../minigames/MiniGameEngine';
 import { MonsterLocation } from '../types';
 
+export interface CucoInstance {
+  id: string;
+  location: MonsterLocation | null;
+  group: THREE.Group;
+  eyes: THREE.Mesh[];
+  jaw: THREE.Mesh | null;
+  leftArm: THREE.Group | null;
+  rightArm: THREE.Group | null;
+  originPos: THREE.Vector3;
+  originRotY: number;
+  inUse: boolean;
+}
+
 export class RoomScene {
   public scene: THREE.Scene;
   public camera: THREE.PerspectiveCamera;
@@ -16,6 +29,7 @@ export class RoomScene {
   public consoleScreenMaterial: THREE.MeshBasicMaterial;
   public screenTexture: THREE.CanvasTexture;
   public cucoMonster: THREE.Group;
+  public cucoPool: CucoInstance[] = [];
   public digitalClockTextCanvas: HTMLCanvasElement;
   public digitalClockTexture: THREE.CanvasTexture;
   public videoTexture: THREE.VideoTexture | null = null;
@@ -25,14 +39,6 @@ export class RoomScene {
   public flashlightTarget: THREE.Object3D;
   private _camDir = new THREE.Vector3();
 
-  // Cuco monster parts for animation
-  private cucoEyes: THREE.Mesh[] = [];
-  private cucoJaw: THREE.Mesh | null = null;
-  private cucoLeftArm: THREE.Group | null = null;
-  private cucoRightArm: THREE.Group | null = null;
-  private monsterTargetPos = new THREE.Vector3();
-  private monsterTargetRotY = 0;
-
   // Nightstand lamp light
   public lampLight: THREE.PointLight;
   public moonlight: THREE.DirectionalLight;
@@ -40,13 +46,18 @@ export class RoomScene {
   private isSoftwareGl: boolean;
   private dustParticles: THREE.Points;
 
-  // Cuco spawn anchor locations in room coordinates
+  // Cuco spawn anchor locations in room coordinates (expanded to 10 spots for infinite mode)
   public static readonly LOCATIONS: Record<MonsterLocation, { pos: [number, number, number]; rotY: number }> = {
     closet: { pos: [-3.2, 0, -1.8], rotY: Math.PI / 3.2 },
     door: { pos: [3.3, 0, -1.0], rotY: -Math.PI / 2.4 },
     window: { pos: [-0.6, 0.4, -3.5], rotY: 0 },
     footbed: { pos: [0, 0, -1.8], rotY: 0 },
     desk: { pos: [2.5, 0, -2.6], rotY: -Math.PI / 4 },
+    underbed: { pos: [-1.4, -0.2, 0.3], rotY: Math.PI / 2.2 },
+    curtain: { pos: [-1.9, 0.2, -3.6], rotY: 0.3 },
+    ceiling: { pos: [-2.6, 1.8, -1.9], rotY: Math.PI / 3 },
+    bookshelf: { pos: [3.2, 0.6, -2.8], rotY: -Math.PI / 3 },
+    hallway: { pos: [3.8, 0, -0.3], rotY: -Math.PI / 2 },
   };
 
   constructor(container: HTMLDivElement, miniGameEngine: MiniGameEngine) {
@@ -132,10 +143,27 @@ export class RoomScene {
     this.scene.add(this.roomGroup);
     this.buildRoom();
 
-    // Build the Cuco Monster
-    this.cucoMonster = this.buildCucoMonster();
-    this.cucoMonster.position.set(0, -10, 0); // hidden initially
-    this.scene.add(this.cucoMonster);
+    // Build the Cuco Monster Pool (up to 4 simultaneous monsters for infinite mode)
+    for (let i = 0; i < 4; i++) {
+      const parts = this.buildCucoMonster();
+      const inst: CucoInstance = {
+        id: '',
+        location: null,
+        group: parts.group,
+        eyes: parts.eyes,
+        jaw: parts.jaw,
+        leftArm: parts.leftArm,
+        rightArm: parts.rightArm,
+        originPos: new THREE.Vector3(0, -20, 0),
+        originRotY: 0,
+        inUse: false,
+      };
+      inst.group.position.set(0, -20, 0);
+      inst.group.visible = false;
+      this.scene.add(inst.group);
+      this.cucoPool.push(inst);
+    }
+    this.cucoMonster = this.cucoPool[0].group;
 
     // Setup Console Canvas Texture
     this.screenTexture = new THREE.CanvasTexture(miniGameEngine.canvas);
@@ -460,8 +488,15 @@ export class RoomScene {
   // Faithfully modeled from the user's sketch:
   // Diamond/chiseled geometric head, wide staring round eyes with dark pupils,
   // open jaw with sharp jagged teeth, blocky torso, segmented long arms, claw/pincer hands!
-  private buildCucoMonster(): THREE.Group {
+  private buildCucoMonster(): {
+    group: THREE.Group;
+    eyes: THREE.Mesh[];
+    jaw: THREE.Mesh | null;
+    leftArm: THREE.Group | null;
+    rightArm: THREE.Group | null;
+  } {
     const monster = new THREE.Group();
+    const eyes: THREE.Mesh[] = [];
 
     // Moodboard palette: Cobalt blue body (#25489c), Red joints/accents (#d92027), Yellow eyes (#ffcc00)
     const bodyMat = new THREE.MeshStandardMaterial({
@@ -506,7 +541,7 @@ export class RoomScene {
       );
       eye.position.set(xOffset, 2.05, 0.325);
       monster.add(eye);
-      this.cucoEyes.push(eye);
+      eyes.push(eye);
 
       const pupil = new THREE.Mesh(
         new THREE.CircleGeometry(0.025, 12),
@@ -538,7 +573,6 @@ export class RoomScene {
       jaw.add(tTooth);
     }
     monster.add(jaw);
-    this.cucoJaw = jawBase;
 
     // 4. Blocky angular Torso (from sketch)
     const chest = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.45, 0.35), bodyMat);
@@ -558,31 +592,31 @@ export class RoomScene {
     monster.add(waist);
 
     // 5. Left Arm with segmented joint and claw/pincer
-    this.cucoLeftArm = new THREE.Group();
-    this.cucoLeftArm.position.set(-0.35, 1.6, 0);
+    const leftArm = new THREE.Group();
+    leftArm.position.set(-0.35, 1.6, 0);
     const shoulderL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.14), accentMat);
-    this.cucoLeftArm.add(shoulderL);
+    leftArm.add(shoulderL);
     const bicepL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.45, 0.12), bodyMat);
     bicepL.position.set(-0.06, -0.22, 0);
-    this.cucoLeftArm.add(bicepL);
+    leftArm.add(bicepL);
     const clawL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.35, 0.08), accentMat);
     clawL.position.set(-0.06, -0.55, 0.06);
-    this.cucoLeftArm.add(clawL);
-    monster.add(this.cucoLeftArm);
+    leftArm.add(clawL);
+    monster.add(leftArm);
 
     // 6. Right Arm (asymmetrical saw/claw arm as sketched in moodboard!)
-    this.cucoRightArm = new THREE.Group();
-    this.cucoRightArm.position.set(0.35, 1.6, 0);
+    const rightArm = new THREE.Group();
+    rightArm.position.set(0.35, 1.6, 0);
     const shoulderR = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.14), accentMat);
-    this.cucoRightArm.add(shoulderR);
+    rightArm.add(shoulderR);
     const bicepR = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.45, 0.12), bodyMat);
     bicepR.position.set(0.06, -0.22, 0);
-    this.cucoRightArm.add(bicepR);
+    rightArm.add(bicepR);
     // Saw/Pincer claw
     const sawClaw = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.45, 0.12), accentMat);
     sawClaw.position.set(0.08, -0.6, 0.08);
-    this.cucoRightArm.add(sawClaw);
-    monster.add(this.cucoRightArm);
+    rightArm.add(sawClaw);
+    monster.add(rightArm);
 
     // 7. Legs
     const legGeo = new THREE.BoxGeometry(0.15, 0.9, 0.16);
@@ -604,7 +638,13 @@ export class RoomScene {
     footR.position.set(0.16, 0.05, 0.06);
     monster.add(footR);
 
-    return monster;
+    return {
+      group: monster,
+      eyes,
+      jaw: jawBase,
+      leftArm,
+      rightArm,
+    };
   }
 
   // --- RETRO HANDHELD CONSOLE (GBA SP style clamshell) ---
@@ -793,52 +833,82 @@ export class RoomScene {
   }
 
   // --- SPAWN OR RETREAT CUCO MONSTER ---
-  public spawnCuco(location: MonsterLocation) {
-    const loc = RoomScene.LOCATIONS[location];
-    this.monsterTargetPos.set(loc.pos[0], loc.pos[1], loc.pos[2]);
-    this.monsterTargetRotY = loc.rotY;
+  public spawnCuco(location: MonsterLocation, id: string = 'default') {
+    let inst = this.cucoPool.find((c) => c.inUse && c.id === id);
+    if (!inst) {
+      inst = this.cucoPool.find((c) => !c.inUse);
+    }
+    if (!inst) return;
 
-    this.cucoMonster.position.copy(this.monsterTargetPos);
-    this.cucoMonster.rotation.y = this.monsterTargetRotY;
-    this.cucoMonster.scale.set(1, 1, 1);
-    this.cucoMonster.visible = true;
+    const loc = RoomScene.LOCATIONS[location];
+    if (!loc) return;
+
+    inst.id = id;
+    inst.inUse = true;
+    inst.location = location;
+    inst.originPos.set(loc.pos[0], loc.pos[1], loc.pos[2]);
+    inst.originRotY = loc.rotY;
+
+    inst.group.position.copy(inst.originPos);
+    inst.group.rotation.y = inst.originRotY;
+    inst.group.scale.set(1, 1, 1);
+    inst.group.visible = true;
 
     // Glowing eyes flare
-    this.cucoEyes.forEach((eye) => {
+    inst.eyes.forEach((eye) => {
       (eye.material as THREE.MeshBasicMaterial).color.setHex(0xfacc15);
     });
   }
 
-  public hideCuco() {
-    this.cucoMonster.visible = false;
-    this.cucoMonster.position.set(0, -10, 0);
+  public hideCuco(id: string = 'default') {
+    const inst = this.cucoPool.find((c) => c.id === id);
+    if (inst) {
+      inst.group.visible = false;
+      inst.group.position.set(0, -20, 0);
+      inst.inUse = false;
+      inst.id = '';
+      inst.location = null;
+    }
+  }
+
+  public hideAllCucos() {
+    this.cucoPool.forEach((inst) => {
+      inst.group.visible = false;
+      inst.group.position.set(0, -20, 0);
+      inst.inUse = false;
+      inst.id = '';
+      inst.location = null;
+    });
   }
 
   // --- JUMPSCARE LUNGE ANIMATION ---
-  public updateJumpscare(progress: number) {
-    this.cucoMonster.visible = true;
+  public updateJumpscare(progress: number, id: string = 'default') {
+    const inst = this.cucoPool.find((c) => c.id === id) || this.cucoPool.find((c) => c.inUse);
+    if (!inst) return;
+
+    inst.group.visible = true;
     // Rapidly charge from monster's spawn position straight into camera face!
     const camPos = this.camera.position;
-    this.cucoMonster.position.lerpVectors(this.monsterTargetPos, camPos, progress * 0.95);
-    this.cucoMonster.lookAt(camPos.x, camPos.y, camPos.z);
+    inst.group.position.lerpVectors(inst.originPos, camPos, progress * 0.95);
+    inst.group.lookAt(camPos.x, camPos.y, camPos.z);
 
     // Terrifying eye flare turning deep blood red
-    this.cucoEyes.forEach((eye) => {
+    inst.eyes.forEach((eye) => {
       (eye.material as THREE.MeshBasicMaterial).color.setHex(0xff0000);
     });
 
     // Shake violently
     const shake = (Math.random() - 0.5) * 0.08 * progress;
-    this.cucoMonster.position.x += shake;
-    this.cucoMonster.position.y += shake;
+    inst.group.position.x += shake;
+    inst.group.position.y += shake;
 
     // Open jaw wide
-    if (this.cucoJaw) {
-      this.cucoJaw.position.y = 1.85 - progress * 0.15;
+    if (inst.jaw) {
+      inst.jaw.position.y = 1.85 - progress * 0.15;
     }
-    if (this.cucoLeftArm && this.cucoRightArm) {
-      this.cucoLeftArm.rotation.x = -Math.PI / 2 * progress;
-      this.cucoRightArm.rotation.x = -Math.PI / 2 * progress;
+    if (inst.leftArm && inst.rightArm) {
+      inst.leftArm.rotation.x = -Math.PI / 2 * progress;
+      inst.rightArm.rotation.x = -Math.PI / 2 * progress;
     }
   }
 
@@ -865,26 +935,31 @@ export class RoomScene {
     // Hide room details completely when looking down at the console for total darkness isolation!
     this.roomGroup.visible = !lookingAtConsole;
 
-    // Cuco is strictly NOT visible when playing on the console (unless jumpscare attack is in progress)
-    if (lookingAtConsole && !this.cucoMonster.position.equals(this.camera.position)) {
-      // Check if jumpscare is not lunging
-      if (this.cucoMonster.position.y > -5 && this.cucoMonster.position.y < 5) {
-        // Only hide if not mid-jumpscare lunge
-        const distToCam = this.cucoMonster.position.distanceTo(this.camera.position);
+    // Cuco visibility across pool: strictly NOT visible when playing on console unless jumpscare is in progress
+    this.cucoPool.forEach((inst) => {
+      if (!inst.inUse) return;
+
+      if (lookingAtConsole) {
+        const distToCam = inst.group.position.distanceTo(this.camera.position);
         if (distToCam > 1.2) {
-          this.cucoMonster.visible = false;
+          inst.group.visible = false;
         }
+      } else {
+        inst.group.visible = true;
+        // Subtle Cuco breathing idle motion if visible
+        const t = performance.now() * 0.003;
+        if (inst.leftArm) inst.leftArm.rotation.z = Math.sin(t + inst.originPos.x) * 0.1;
+        if (inst.rightArm) inst.rightArm.rotation.z = -Math.sin(t + inst.originPos.x) * 0.1;
       }
-    }
+    });
 
     // 4. Animate handheld console position and scale:
-    // User request: The minigame SCREEN itself must be centered in the viewport!
-    // Screen center in console local space is at Y ≈ +0.105 * scale.
-    // Setting targetConsoleY = -0.16 aligns the screen center exactly with Y ≈ 0 (dead center)!
-    const targetConsoleY = lookingAtConsole ? -0.16 : -0.65;
-    const targetConsoleZ = lookingAtConsole ? -0.26 : -0.55;
+    // Adapt for landscape vs portrait mobile viewports so the LCD screen is centered without overlap
+    const isLandscape = this.camera.aspect > 1.2;
+    const targetConsoleY = lookingAtConsole ? (isLandscape ? -0.13 : -0.16) : -0.65;
+    const targetConsoleZ = lookingAtConsole ? (isLandscape ? -0.31 : -0.26) : -0.55;
     const targetConsoleRotX = lookingAtConsole ? 0.20 : 0.85;
-    const targetConsoleScale = lookingAtConsole ? 1.50 : 0.85;
+    const targetConsoleScale = lookingAtConsole ? (isLandscape ? 1.32 : 1.50) : 0.85;
 
     this.consoleMeshGroup.position.y = THREE.MathUtils.damp(
       this.consoleMeshGroup.position.y,
@@ -909,7 +984,7 @@ export class RoomScene {
     const newScale = THREE.MathUtils.damp(currentScale, targetConsoleScale, 8, dt);
     this.consoleMeshGroup.scale.set(newScale, newScale, newScale);
 
-    // 3. Subtle floating dust motion
+    // 5. Subtle floating dust motion
     const positions = this.dustParticles.geometry.attributes.position.array as Float32Array;
     for (let i = 1; i < positions.length; i += 3) {
       positions[i] -= dt * 0.05;
@@ -917,14 +992,7 @@ export class RoomScene {
     }
     this.dustParticles.geometry.attributes.position.needsUpdate = true;
 
-    // 4. Subtle Cuco breathing idle motion if visible
-    if (this.cucoMonster.visible) {
-      const t = performance.now() * 0.003;
-      if (this.cucoLeftArm) this.cucoLeftArm.rotation.z = Math.sin(t) * 0.1;
-      if (this.cucoRightArm) this.cucoRightArm.rotation.z = -Math.sin(t) * 0.1;
-    }
-
-    // 5. Render scene
+    // 6. Render scene
     this.renderer.render(this.scene, this.camera);
   }
 

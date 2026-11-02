@@ -5,7 +5,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
-import { GameState, MonsterLocation, MonsterState, SensorStatus, GameStats } from './types';
+import { GameState, GameMode, MonsterLocation, ActiveMonster, SensorStatus, GameStats } from './types';
 import { soundEngine } from './audio/SoundEngine';
 import { MiniGameEngine } from './minigames/MiniGameEngine';
 import { RoomScene } from './three/RoomScene';
@@ -14,6 +14,7 @@ import { ConsoleControls } from './components/ConsoleControls';
 import { PermissionsModal } from './components/PermissionsModal';
 import { GameOverModal } from './components/GameOverModal';
 import { VictoryModal } from './components/VictoryModal';
+import { RotatePrompt } from './components/RotatePrompt';
 
 export default function App() {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -31,14 +32,24 @@ export default function App() {
   const [isMuted, setIsMuted] = useState<boolean>(false);
 
   // Time & stats
-  const [stats, setStats] = useState<GameStats>({
-    score: 0,
-    level: 1,
-    monstersRepelled: 0,
-    timeSurvivedMinutes: 0,
-    currentHour: 0, // 0 = 12 AM
-    gameTimeSeconds: 0,
+  const [stats, setStats] = useState<GameStats>(() => {
+    const savedBest =
+      typeof window !== 'undefined'
+        ? parseInt(localStorage.getItem('desvelada_infinite_highscore') || '0', 10) || 0
+        : 0;
+    return {
+      score: 0,
+      level: 1,
+      monstersRepelled: 0,
+      timeSurvivedMinutes: 0,
+      currentHour: 0, // 0 = 12 AM
+      gameTimeSeconds: 0,
+      mode: 'classic',
+      highScore: savedBest,
+    };
   });
+
+  const modeRef = useRef<GameMode>('classic');
 
   // Sensor states
   const [sensorStatus, setSensorStatus] = useState<SensorStatus>({
@@ -58,16 +69,9 @@ export default function App() {
   // Gyroscope tracking
   const gyroBaseAlpha = useRef<number | null>(null);
 
-  // Monster tracking
-  const monsterRef = useRef<MonsterState>({
-    active: false,
-    location: 'closet',
-    timer: 5.0,
-    maxTimer: 5.0,
-    spotted: false,
-    isAttacking: false,
-    attackProgress: 0,
-  });
+  // Monster tracking (Pool of active monsters for classic and infinite modes)
+  const monstersRef = useRef<ActiveMonster[]>([]);
+  const attackingMonsterId = useRef<string | null>(null);
 
   // Drag interaction
   const isDragging = useRef<boolean>(false);
@@ -84,13 +88,27 @@ export default function App() {
     // Reduce boredom on alien hit
     miniGame.onActionSuccess = () => {
       setBoredom((prev) => Math.max(0, prev - 4.0));
-      setStats((prev) => ({ ...prev, score: miniGame.score }));
+      setStats((prev) => {
+        const nextScore = miniGame.score;
+        const nextHigh = Math.max(prev.highScore, nextScore);
+        if (prev.mode === 'infinite' && nextScore > prev.highScore) {
+          localStorage.setItem('desvelada_infinite_highscore', String(nextScore));
+        }
+        return { ...prev, score: nextScore, highScore: nextHigh };
+      });
     };
 
     // Level up reward
     miniGame.onLevelUp = (newLevel) => {
       setBoredom((prev) => Math.max(0, prev - 22)); // big adrenaline rush on level clear!
-      setStats((prev) => ({ ...prev, level: newLevel, score: miniGame.score }));
+      setStats((prev) => {
+        const nextScore = miniGame.score;
+        const nextHigh = Math.max(prev.highScore, nextScore);
+        if (prev.mode === 'infinite' && nextScore > prev.highScore) {
+          localStorage.setItem('desvelada_infinite_highscore', String(nextScore));
+        }
+        return { ...prev, level: newLevel, score: nextScore, highScore: nextHigh };
+      });
     };
 
     const roomScene = new RoomScene(mountRef.current, miniGame);
@@ -107,8 +125,14 @@ export default function App() {
   }, []);
 
   // --- SENSOR PERMISSIONS & START GAME ---
-  const handleStartGame = async (options: { enableGyro: boolean; enableCamera: boolean }) => {
+  const handleStartGame = async (options: {
+    enableGyro: boolean;
+    enableCamera: boolean;
+    mode: GameMode;
+  }) => {
     soundEngine.init();
+    modeRef.current = options.mode;
+    setStats((prev) => ({ ...prev, mode: options.mode }));
     setGameState('playing');
 
     // 1. Gyroscope setup
@@ -286,7 +310,7 @@ export default function App() {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [toggleLook, startSleeping, endSleeping]);
+  }, [gameState, toggleLook, startSleeping, endSleeping]);
 
   // Touch / Pointer Drag for 360 degree room rotation
   const handlePointerDown = (e: React.PointerEvent) => {
@@ -320,20 +344,18 @@ export default function App() {
     setLookingAtConsole(true);
     targetPitch.current = -0.45;
     targetYaw.current = 0;
-    monsterRef.current = {
-      active: false,
-      location: 'closet',
-      timer: 5.5,
-      maxTimer: 5.5,
-      spotted: false,
-      isAttacking: false,
-      attackProgress: 0,
-    };
-    sceneRef.current?.hideCuco();
+    monstersRef.current = [];
+    attackingMonsterId.current = null;
+    sceneRef.current?.hideAllCucos();
 
     // Preserve the level achieved in Space Invaders!
     const currentLevel = stats.level;
     miniGameRef.current?.reset(true);
+
+    const savedBest =
+      typeof window !== 'undefined'
+        ? parseInt(localStorage.getItem('desvelada_infinite_highscore') || '0', 10) || 0
+        : 0;
 
     setStats({
       score: 0,
@@ -342,6 +364,8 @@ export default function App() {
       timeSurvivedMinutes: 0,
       currentHour: 0,
       gameTimeSeconds: 0,
+      mode: stats.mode,
+      highScore: savedBest,
     });
     setGameState('playing');
   };
@@ -350,8 +374,22 @@ export default function App() {
   useEffect(() => {
     let animId = 0;
     let lastTime = performance.now();
-    let cucoSpawnCountdown = 14 + Math.random() * 8; // seconds until first stealth spawn
+    let cucoSpawnCountdown = modeRef.current === 'infinite' ? 5.0 : (14 + Math.random() * 8);
     let clockTickTimer = 0;
+
+    const classicSpots: MonsterLocation[] = ['closet', 'door', 'window', 'footbed', 'desk'];
+    const infiniteSpots: MonsterLocation[] = [
+      'closet',
+      'door',
+      'window',
+      'footbed',
+      'desk',
+      'underbed',
+      'curtain',
+      'ceiling',
+      'bookshelf',
+      'hallway',
+    ];
 
     const loop = (now: number) => {
       const dt = Math.min(0.1, (now - lastTime) / 1000);
@@ -396,8 +434,9 @@ export default function App() {
               const hourDisplay = hour === 0 ? '12:00 AM' : `${hour}:00 AM`;
               scene.updateClockDisplay(hourDisplay);
 
-              // Check 6:00 AM Dawn victory!
-              if (hour >= 6) {
+              // Check 6:00 AM Dawn victory ONLY in classic mode!
+              // In infinite mode, the night never ends!
+              if (prev.mode === 'classic' && hour >= 6) {
                 soundEngine.playVictoryFanfare();
                 setGameState('victory');
               }
@@ -411,11 +450,11 @@ export default function App() {
           }
 
           // --- Boredom / Sleep Meter Logic ---
-          // Rule: When not playing on the console, meter fills in exactly 3 seconds (33.3% per second)!
+          // USER REQUIREMENT: Sleep meter takes 10 SECONDS without playing to reach 100%!
           if (isSleeping) {
-            // Feigning sleep: fills at a measured pace so player can trick the Cuco without instantly falling asleep
+            // Feigning sleep: fills over ~18 seconds so player can trick the Cuco without falling asleep too fast
             setBoredom((prev) => {
-              const next = prev + (100 / 6.0) * dt;
+              const next = prev + (100 / 18.0) * dt;
               if (next >= 100) {
                 soundEngine.playSleepFall();
                 setGameState('slept');
@@ -425,12 +464,12 @@ export default function App() {
             });
           } else if (isLookingDown) {
             // Looking down and actively playing: drains boredom rapidly so you stay wide awake!
-            setBoredom((prev) => Math.max(0, prev - 50.0 * dt));
+            setBoredom((prev) => Math.max(0, prev - 45.0 * dt));
           } else {
             // NOT playing on the console (looking around the dark room):
-            // Exactly 3 seconds without playing reaches 100% and you fall asleep!
+            // Exactly 10 seconds without playing reaches 100% and you fall asleep!
             setBoredom((prev) => {
-              const next = prev + (100 / 3.0) * dt;
+              const next = prev + (100 / 10.0) * dt;
               if (next >= 100) {
                 soundEngine.playSleepFall();
                 setGameState('slept');
@@ -440,57 +479,86 @@ export default function App() {
             });
           }
 
-          // --- STEALTH CUCO MONSTER LOGIC ---
-          // No warnings, no heartbeat spoiler sound, no UI alert banner!
-          // Pure stealth: Player must physically sweep the dark room with flashlight!
-          const monster = monsterRef.current;
-          if (!monster.active) {
-            cucoSpawnCountdown -= dt;
-            if (cucoSpawnCountdown <= 0) {
-              // Spawn Cuco silently in a random spot!
-              const spots: MonsterLocation[] = ['closet', 'door', 'window', 'footbed', 'desk'];
-              const chosen = spots[Math.floor(Math.random() * spots.length)];
-              monster.active = true;
-              monster.location = chosen;
-              // Timer to feign sleep: 5.5 seconds before it lunges
-              monster.timer = 5.5;
-              monster.maxTimer = 5.5;
-              monster.spotted = false;
-              monster.isAttacking = false;
-              monster.attackProgress = 0;
+          // --- CUCO MONSTER SPAWN & AI LOGIC ---
+          const isInfinite = modeRef.current === 'infinite';
+          const maxMonsters = isInfinite ? Math.min(3, 2 + Math.floor(stats.gameTimeSeconds / 80)) : 1;
+          const availableSpotsPool = isInfinite ? infiniteSpots : classicSpots;
 
-              scene.spawnCuco(chosen);
-              // SILENT: No soundEngine.playMonsterStalk() as requested!
+          cucoSpawnCountdown -= dt;
+
+          if (cucoSpawnCountdown <= 0 && monstersRef.current.length < maxMonsters) {
+            // Find spots currently unoccupied
+            const occupied = new Set(monstersRef.current.map((m) => m.location));
+            const freeSpots = availableSpotsPool.filter((s) => !occupied.has(s));
+
+            if (freeSpots.length > 0) {
+              const chosen = freeSpots[Math.floor(Math.random() * freeSpots.length)];
+              const newId = `cuco_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+              const attackTimer = isInfinite ? (4.5 + Math.random() * 1.0) : 5.5;
+
+              const monster: ActiveMonster = {
+                id: newId,
+                location: chosen,
+                timer: attackTimer,
+                maxTimer: attackTimer,
+                spotted: false,
+                isAttacking: false,
+                attackProgress: 0,
+              };
+
+              monstersRef.current.push(monster);
+              scene.spawnCuco(chosen, newId);
             }
-          } else {
-            // SILENT: No heartbeat countdown sound as requested!
+
+            // Next spawn countdown: in infinite mode they spawn much more frequently!
+            cucoSpawnCountdown = isInfinite
+              ? (4.0 + Math.random() * 4.5)
+              : (15.0 + Math.random() * 8.0);
+          }
+
+          // Process all active monsters
+          if (monstersRef.current.length > 0) {
             if (isSleeping) {
-              // Player is pretending to sleep with blanket!
-              monster.timer -= dt * 2.0;
-              if (monster.timer <= 1.0) {
-                // Cuco is fooled and silently retreats!
-                scene.hideCuco();
-                soundEngine.playMonsterRetreat();
-                monster.active = false;
-                setStats((prev) => ({ ...prev, monstersRepelled: prev.monstersRepelled + 1 }));
-                cucoSpawnCountdown = 16 + Math.random() * 10;
+              // Player is pretending to sleep with blanket:
+              // All active monsters are deceived and their timers tick down rapidly!
+              for (let i = monstersRef.current.length - 1; i >= 0; i--) {
+                const m = monstersRef.current[i];
+                m.timer -= dt * 2.2;
+                if (m.timer <= 1.0) {
+                  // Cuco is fooled and silently retreats into the shadows!
+                  scene.hideCuco(m.id);
+                  soundEngine.playMonsterRetreat();
+                  monstersRef.current.splice(i, 1);
+                  setStats((prev) => ({
+                    ...prev,
+                    monstersRepelled: prev.monstersRepelled + 1,
+                  }));
+                }
               }
             } else {
-              // Player is not sleeping: timer ticks down
-              monster.timer -= dt;
-              if (monster.timer <= 0) {
-                // JUMPSCARE ATTACK!
-                monster.isAttacking = true;
-                setGameState('jumpscare');
-                soundEngine.playJumpscare();
+              // Player is not sleeping: timers count down towards attacks
+              for (const m of monstersRef.current) {
+                m.timer -= dt;
+                if (m.timer <= 0 && !m.isAttacking) {
+                  // JUMPSCARE ATTACK TRIGGERED!
+                  m.isAttacking = true;
+                  attackingMonsterId.current = m.id;
+                  setGameState('jumpscare');
+                  soundEngine.playJumpscare();
+                  break;
+                }
               }
             }
           }
         } else if (gameState === 'jumpscare') {
           // Rapid Cuco lunge straight into camera!
-          const monster = monsterRef.current;
-          monster.attackProgress = Math.min(1.0, monster.attackProgress + dt * 4.0);
-          scene.updateJumpscare(monster.attackProgress);
+          const attacker =
+            monstersRef.current.find((m) => m.id === attackingMonsterId.current) ||
+            monstersRef.current[0];
+          if (attacker) {
+            attacker.attackProgress = Math.min(1.0, attacker.attackProgress + dt * 4.0);
+            scene.updateJumpscare(attacker.attackProgress, attacker.id);
+          }
         }
 
         // 3. Update Scene & Handheld Console
@@ -502,7 +570,7 @@ export default function App() {
 
     animId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animId);
-  }, [gameState, isSleeping]);
+  }, [gameState, isSleeping, stats.gameTimeSeconds]);
 
   const timeString =
     stats.currentHour === 0 ? '12:00 AM' : `${stats.currentHour}:00 AM`;
@@ -515,6 +583,9 @@ export default function App() {
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
     >
+      {/* Mobile / Tablet Landscape Orientation Prompt */}
+      <RotatePrompt />
+
       {/* Three.js Canvas Mount Container */}
       <div ref={mountRef} className="absolute inset-0 h-full w-full" />
 
@@ -571,6 +642,7 @@ export default function App() {
             timeString={timeString}
             gameTimeSeconds={stats.gameTimeSeconds}
             level={stats.level}
+            mode={stats.mode}
             lookingAtConsole={lookingAtConsole}
             isSleeping={isSleeping}
             onSleepStart={startSleeping}

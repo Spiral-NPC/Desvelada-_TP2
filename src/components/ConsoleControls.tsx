@@ -32,7 +32,7 @@ export const ConsoleControls: React.FC<ConsoleControlsProps> = ({
   };
 
   return (
-    <div className="pointer-events-none fixed bottom-16 left-0 right-0 z-20 flex items-end justify-between px-3 pb-1 select-none">
+    <div className="pointer-events-none fixed bottom-4 sm:bottom-8 left-0 right-0 z-20 flex items-end justify-between px-3 sm:px-6 pb-1 select-none">
       {/* --- D-PAD (Left) --- */}
       <div className="pointer-events-auto relative h-28 w-28">
         <div className="absolute inset-0 flex items-center justify-center">
