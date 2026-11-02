@@ -72,6 +72,9 @@ export default function App() {
   // Monster tracking (Pool of active monsters for classic and infinite modes)
   const monstersRef = useRef<ActiveMonster[]>([]);
   const attackingMonsterId = useRef<string | null>(null);
+  const cucoSpawnCountdown = useRef<number>(3.5); // First Cuco appears in ~3.5 seconds!
+  const jumpscareTimer = useRef<number>(0);
+  const [showGameOver, setShowGameOver] = useState<boolean>(false);
 
   // Drag interaction
   const isDragging = useRef<boolean>(false);
@@ -346,6 +349,9 @@ export default function App() {
     targetYaw.current = 0;
     monstersRef.current = [];
     attackingMonsterId.current = null;
+    cucoSpawnCountdown.current = 3.5;
+    jumpscareTimer.current = 0;
+    setShowGameOver(false);
     sceneRef.current?.hideAllCucos();
 
     // Preserve the level achieved in Space Invaders!
@@ -374,7 +380,6 @@ export default function App() {
   useEffect(() => {
     let animId = 0;
     let lastTime = performance.now();
-    let cucoSpawnCountdown = modeRef.current === 'infinite' ? 5.0 : (14 + Math.random() * 8);
     let clockTickTimer = 0;
 
     const classicSpots: MonsterLocation[] = ['closet', 'door', 'window', 'footbed', 'desk'];
@@ -458,6 +463,7 @@ export default function App() {
               if (next >= 100) {
                 soundEngine.playSleepFall();
                 setGameState('slept');
+                setShowGameOver(true);
                 return 100;
               }
               return next;
@@ -473,6 +479,7 @@ export default function App() {
               if (next >= 100) {
                 soundEngine.playSleepFall();
                 setGameState('slept');
+                setShowGameOver(true);
                 return 100;
               }
               return next;
@@ -484,9 +491,9 @@ export default function App() {
           const maxMonsters = isInfinite ? Math.min(3, 2 + Math.floor(stats.gameTimeSeconds / 80)) : 1;
           const availableSpotsPool = isInfinite ? infiniteSpots : classicSpots;
 
-          cucoSpawnCountdown -= dt;
+          cucoSpawnCountdown.current -= dt;
 
-          if (cucoSpawnCountdown <= 0 && monstersRef.current.length < maxMonsters) {
+          if (cucoSpawnCountdown.current <= 0 && monstersRef.current.length < maxMonsters) {
             // Find spots currently unoccupied
             const occupied = new Set(monstersRef.current.map((m) => m.location));
             const freeSpots = availableSpotsPool.filter((s) => !occupied.has(s));
@@ -510,10 +517,10 @@ export default function App() {
               scene.spawnCuco(chosen, newId);
             }
 
-            // Next spawn countdown: in infinite mode they spawn much more frequently!
-            cucoSpawnCountdown = isInfinite
-              ? (4.0 + Math.random() * 4.5)
-              : (15.0 + Math.random() * 8.0);
+            // USER REQUIREMENT: Frecuencia mucho más alta, aprox cada 5-10 segundos!
+            cucoSpawnCountdown.current = isInfinite
+              ? (4.0 + Math.random() * 4.0) // 4 to 8s
+              : (5.0 + Math.random() * 5.0); // 5 to 10s!
           }
 
           // Process all active monsters
@@ -543,21 +550,45 @@ export default function App() {
                   // JUMPSCARE ATTACK TRIGGERED!
                   m.isAttacking = true;
                   attackingMonsterId.current = m.id;
+                  jumpscareTimer.current = 0;
                   setGameState('jumpscare');
+                  setShowGameOver(false);
+
+                  // Instantly snap player's view straight towards the attacking Cuco!
+                  targetPitch.current = 0.05;
+                  setLookingAtConsole(false);
+                  const loc = RoomScene.LOCATIONS[m.location];
+                  if (loc) {
+                    targetYaw.current = -Math.atan2(loc.pos[0], -loc.pos[2]);
+                  }
+
                   soundEngine.playJumpscare();
+                  soundEngine.triggerHaptic([100, 50, 150, 50, 250]);
                   break;
                 }
               }
             }
           }
         } else if (gameState === 'jumpscare') {
-          // Rapid Cuco lunge straight into camera!
+          // Play out 1.3 seconds of terrifying visceral jumpscare!
+          jumpscareTimer.current += dt;
+          const progress = Math.min(1.0, jumpscareTimer.current / 1.3);
+
           const attacker =
             monstersRef.current.find((m) => m.id === attackingMonsterId.current) ||
             monstersRef.current[0];
           if (attacker) {
-            attacker.attackProgress = Math.min(1.0, attacker.attackProgress + dt * 4.0);
-            scene.updateJumpscare(attacker.attackProgress, attacker.id);
+            attacker.attackProgress = progress;
+            scene.updateJumpscare(progress, attacker.id);
+          }
+
+          // Violent screen shake during jumpscare
+          cameraYaw.current += (Math.random() - 0.5) * 0.06;
+          cameraPitch.current += (Math.random() - 0.5) * 0.06;
+
+          // After full 1.3s jumpscare animation, show GameOver modal
+          if (jumpscareTimer.current >= 1.3 && !showGameOver) {
+            setShowGameOver(true);
           }
         }
 
@@ -570,7 +601,7 @@ export default function App() {
 
     animId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animId);
-  }, [gameState, isSleeping, stats.gameTimeSeconds]);
+  }, [gameState, isSleeping]);
 
   const timeString =
     stats.currentHour === 0 ? '12:00 AM' : `${stats.currentHour}:00 AM`;
@@ -680,8 +711,31 @@ export default function App() {
         />
       )}
 
-      {/* --- GAME OVER SCREENS (Zero delay, locks background game) --- */}
-      {(gameState === 'slept' || gameState === 'jumpscare') && (
+      {/* --- TERRIFYING VISCERAL JUMPSCARE OVERLAY --- */}
+      {gameState === 'jumpscare' && !showGameOver && (
+        <div className="pointer-events-none fixed inset-0 z-40 overflow-hidden select-none">
+          {/* Intense flashing red blood vignette */}
+          <div
+            className="absolute inset-0 animate-pulse"
+            style={{
+              background:
+                'radial-gradient(circle at center, rgba(239, 68, 68, 0.35) 0%, rgba(185, 28, 28, 0.8) 60%, rgba(69, 10, 10, 0.98) 100%)',
+            }}
+          />
+          {/* Glitch text */}
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-4">
+            <div className="font-pixel text-2xl sm:text-4xl text-red-500 tracking-widest drop-shadow-[0_0_25px_rgba(255,0,0,1)] animate-bounce">
+              ¡EL CUCO TE ATRAPÓ!
+            </div>
+            <div className="mt-2 font-pixel text-xs text-red-200 tracking-wider">
+              EL MONSTRUO SE LANZÓ SOBRE TI
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- GAME OVER SCREENS --- */}
+      {(gameState === 'slept' || (gameState === 'jumpscare' && showGameOver)) && (
         <GameOverModal
           reason={gameState === 'jumpscare' ? 'jumpscare' : 'slept'}
           stats={stats}

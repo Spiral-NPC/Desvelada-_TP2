@@ -13,6 +13,7 @@ export interface CucoInstance {
   location: MonsterLocation | null;
   group: THREE.Group;
   eyes: THREE.Mesh[];
+  eyeLight: THREE.PointLight;
   jaw: THREE.Mesh | null;
   leftArm: THREE.Group | null;
   rightArm: THREE.Group | null;
@@ -117,9 +118,9 @@ export class RoomScene {
     this.lampLight.position.set(-1.45, 0.95, 0.5);
     this.scene.add(this.lampLight);
 
-    // --- PLAYER FLASHLIGHT (Linterna estrecha de radio pequeño hacia donde apuntas) ---
-    // Narrow cone (Math.PI / 10 = 18 degrees) with short, focused reach
-    this.flashlight = new THREE.SpotLight(0xffeedd, 5.5, 12, Math.PI / 10, 0.3, 1.8);
+    // --- PLAYER FLASHLIGHT ---
+    // Comfortable cone (Math.PI / 5.5 = ~33 degrees) with strong reach in pitch dark bedroom
+    this.flashlight = new THREE.SpotLight(0xffeedd, 8.0, 16, Math.PI / 5.5, 0.4, 1.4);
     this.flashlight.position.copy(this.camera.position);
     this.flashlight.castShadow = !this.isSoftwareGl;
     if (!this.isSoftwareGl) {
@@ -146,11 +147,17 @@ export class RoomScene {
     // Build the Cuco Monster Pool (up to 4 simultaneous monsters for infinite mode)
     for (let i = 0; i < 4; i++) {
       const parts = this.buildCucoMonster();
+      // Glowing eerie amber eye light that illuminates the monster in the dark
+      const eyeLight = new THREE.PointLight(0xfacc15, 2.5, 3.5, 2);
+      eyeLight.position.set(0, 2.05, 0.35);
+      parts.group.add(eyeLight);
+
       const inst: CucoInstance = {
         id: '',
         location: null,
         group: parts.group,
         eyes: parts.eyes,
+        eyeLight,
         jaw: parts.jaw,
         leftArm: parts.leftArm,
         rightArm: parts.rightArm,
@@ -850,7 +857,8 @@ export class RoomScene {
     inst.originRotY = loc.rotY;
 
     inst.group.position.copy(inst.originPos);
-    inst.group.rotation.y = inst.originRotY;
+    // Face the player on the bed so its glowing eyes stare directly into player's view!
+    inst.group.lookAt(0, 1.25, 0.2);
     inst.group.scale.set(1, 1, 1);
     inst.group.visible = true;
 
@@ -858,6 +866,12 @@ export class RoomScene {
     inst.eyes.forEach((eye) => {
       (eye.material as THREE.MeshBasicMaterial).color.setHex(0xfacc15);
     });
+
+    if (inst.eyeLight) {
+      inst.eyeLight.color.setHex(0xfacc15);
+      inst.eyeLight.intensity = 2.8;
+      inst.eyeLight.visible = true;
+    }
   }
 
   public hideCuco(id: string = 'default') {
@@ -868,6 +882,9 @@ export class RoomScene {
       inst.inUse = false;
       inst.id = '';
       inst.location = null;
+      if (inst.eyeLight) {
+        inst.eyeLight.visible = false;
+      }
     }
   }
 
@@ -878,6 +895,9 @@ export class RoomScene {
       inst.inUse = false;
       inst.id = '';
       inst.location = null;
+      if (inst.eyeLight) {
+        inst.eyeLight.visible = false;
+      }
     });
   }
 
@@ -896,6 +916,12 @@ export class RoomScene {
     inst.eyes.forEach((eye) => {
       (eye.material as THREE.MeshBasicMaterial).color.setHex(0xff0000);
     });
+
+    if (inst.eyeLight) {
+      inst.eyeLight.color.setHex(0xff0000);
+      inst.eyeLight.intensity = 8.0;
+      inst.eyeLight.visible = true;
+    }
 
     // Shake violently
     const shake = (Math.random() - 0.5) * 0.08 * progress;
