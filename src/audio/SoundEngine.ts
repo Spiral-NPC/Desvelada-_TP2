@@ -12,8 +12,33 @@ class SoundEngine {
   private heartbeatInterval: number | null = null;
   private isMuted: boolean = false;
   private initialized: boolean = false;
+  private ambienteAudio: HTMLAudioElement | null = null;
+  private consolaAudio: HTMLAudioElement | null = null;
+  private gameOverAudio: HTMLAudioElement | null = null;
 
   public init() {
+    if (typeof window !== 'undefined') {
+      try {
+        if (!this.ambienteAudio) {
+          this.ambienteAudio = new Audio('/assets/aistudio/ambiente_6d7ff092.mp3');
+          this.ambienteAudio.loop = true;
+          this.ambienteAudio.volume = this.isMuted ? 0 : 0.65;
+        }
+        if (!this.consolaAudio) {
+          this.consolaAudio = new Audio('/assets/aistudio/consola_b9774942.mp3');
+          this.consolaAudio.loop = true;
+          this.consolaAudio.volume = this.isMuted ? 0 : 0.60;
+        }
+        if (!this.gameOverAudio) {
+          this.gameOverAudio = new Audio('/assets/aistudio/game_over_9d150ac7.mp3');
+          this.gameOverAudio.loop = false;
+          this.gameOverAudio.volume = this.isMuted ? 0 : 0.85;
+        }
+      } catch (err) {
+        console.warn('Audio element initialization error:', err);
+      }
+    }
+
     if (this.initialized && this.ctx) {
       if (this.ctx.state === 'suspended') {
         this.ctx.resume();
@@ -40,6 +65,9 @@ class SoundEngine {
     if (this.masterGain && this.ctx) {
       this.masterGain.gain.setTargetAtTime(muted ? 0 : 0.85, this.ctx.currentTime, 0.05);
     }
+    if (this.ambienteAudio) this.ambienteAudio.volume = muted ? 0 : 0.65;
+    if (this.consolaAudio) this.consolaAudio.volume = muted ? 0 : 0.60;
+    if (this.gameOverAudio) this.gameOverAudio.volume = muted ? 0 : 0.85;
   }
 
   public triggerHaptic(pattern: number | number[]) {
@@ -509,7 +537,84 @@ class SoundEngine {
     this.triggerHaptic(10);
   }
 
+  // --- MP3 TRACK MANAGEMENT & BUFFER CLEANUP ---
+  public isGameOverPlaying(): boolean {
+    return !!(this.gameOverAudio && !this.gameOverAudio.paused && !this.gameOverAudio.ended);
+  }
+
+  public playAmbienteMusic() {
+    this.stopConsolaMusic();
+    // Do not play ambient music while game over sound is actively playing
+    if (this.isGameOverPlaying()) return;
+
+    if (!this.ambienteAudio || this.isMuted) return;
+    if (this.ambienteAudio.paused) {
+      this.ambienteAudio.volume = 0.65;
+      this.ambienteAudio.play().catch(() => {});
+    }
+  }
+
+  public stopAmbienteMusic() {
+    if (this.ambienteAudio) {
+      this.ambienteAudio.pause();
+      this.ambienteAudio.currentTime = 0;
+    }
+  }
+
+  public playConsolaMusic() {
+    this.stopAmbienteMusic();
+    this.stopGameOverMusic();
+    if (!this.consolaAudio || this.isMuted) return;
+    if (this.consolaAudio.paused) {
+      this.consolaAudio.volume = 0.60;
+      this.consolaAudio.play().catch(() => {});
+    }
+  }
+
+  public stopConsolaMusic() {
+    if (this.consolaAudio) {
+      this.consolaAudio.pause();
+      this.consolaAudio.currentTime = 0;
+    }
+  }
+
+  public playGameOverMusic(onEnded?: () => void) {
+    this.stopAmbienteMusic();
+    this.stopConsolaMusic();
+    if (!this.gameOverAudio) {
+      if (onEnded) onEnded();
+      return;
+    }
+    this.gameOverAudio.pause();
+    this.gameOverAudio.currentTime = 0;
+    this.gameOverAudio.volume = this.isMuted ? 0 : 0.85;
+
+    this.gameOverAudio.onended = () => {
+      if (onEnded) onEnded();
+    };
+
+    this.gameOverAudio.play().catch(() => {
+      // If auto-play blocked or error occurs, trigger fallback
+      if (onEnded) onEnded();
+    });
+  }
+
+  public stopGameOverMusic() {
+    if (this.gameOverAudio) {
+      this.gameOverAudio.onended = null;
+      this.gameOverAudio.pause();
+      this.gameOverAudio.currentTime = 0;
+    }
+  }
+
+  public stopAllMusic() {
+    this.stopAmbienteMusic();
+    this.stopConsolaMusic();
+    this.stopGameOverMusic();
+  }
+
   public dispose() {
+    this.stopAllMusic();
     if (this.ambientOsc) {
       this.ambientOsc.stop();
       this.ambientOsc.disconnect();
@@ -518,6 +623,9 @@ class SoundEngine {
       this.ctx.close();
       this.ctx = null;
     }
+    this.ambienteAudio = null;
+    this.consolaAudio = null;
+    this.gameOverAudio = null;
     this.initialized = false;
   }
 }

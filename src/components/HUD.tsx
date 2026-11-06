@@ -7,7 +7,6 @@
 
 import React from 'react';
 import {
-  Compass,
   Volume2,
   VolumeX,
   Eye,
@@ -17,22 +16,24 @@ import {
   Clock,
   Zap,
   Infinity as InfinityIcon,
+  Flashlight,
+  ShieldAlert,
 } from 'lucide-react';
 import { SensorStatus, GameMode } from '../types';
 
 interface HUDProps {
-  boredom: number; // 0 to 100 (fills in 10 seconds if not playing!)
+  boredom: number; // 0 to 100
   timeString: string;
   gameTimeSeconds: number;
   level: number;
   mode?: GameMode;
   lookingAtConsole: boolean;
+  cucoInBeam: boolean;
   isSleeping: boolean;
   onSleepStart: () => void;
   onSleepEnd: () => void;
   onToggleLook: () => void;
   sensorStatus: SensorStatus;
-  onToggleGyro: () => void;
   isMuted: boolean;
   onToggleMute: () => void;
 }
@@ -43,26 +44,26 @@ export const HUD: React.FC<HUDProps> = ({
   level,
   mode = 'classic',
   lookingAtConsole,
+  cucoInBeam,
   isSleeping,
   onSleepStart,
   onSleepEnd,
   onToggleLook,
-  sensorStatus,
-  onToggleGyro,
   isMuted,
   onToggleMute,
 }) => {
   const isHighBoredom = boredom > 65;
+  const canSleep = !lookingAtConsole && cucoInBeam;
 
   return (
-    <div className="pointer-events-none fixed inset-0 z-30 flex flex-col justify-between p-2 select-none">
+    <div className="pointer-events-none fixed inset-0 z-50 flex flex-col justify-between p-2 select-none">
       {/* --- TOP HEADER & CONTROLS --- */}
       <div className="flex flex-col items-center gap-1.5 w-full">
-        {/* Top bar: Stats and Sensor Badges */}
+        {/* Top bar: Stats and Sound Toggle */}
         <div className="flex w-full items-center justify-between gap-1">
           {/* Left: Clock, Mode & Level */}
           <div className="pointer-events-auto flex items-center gap-1.5">
-            <div className="flex items-center gap-1 rounded-xl bg-slate-950/85 px-2.5 py-1 text-white shadow-lg border border-slate-800">
+            <div className="flex items-center gap-1 rounded-xl bg-slate-950/90 px-2.5 py-1 text-white shadow-lg border border-slate-800">
               <Clock className="h-3.5 w-3.5 text-rose-400" />
               <span className="font-pixel text-[11px] tracking-wider text-rose-300">
                 {timeString}
@@ -78,7 +79,7 @@ export const HUD: React.FC<HUDProps> = ({
               </div>
             ) : null}
 
-            <div className="flex items-center gap-1 rounded-xl bg-slate-950/85 px-2 py-1 shadow-lg border border-slate-800">
+            <div className="flex items-center gap-1 rounded-xl bg-slate-950/90 px-2 py-1 shadow-lg border border-slate-800">
               <Zap className="h-3 w-3 text-cyan-400" />
               <span className="font-pixel text-[9px] text-cyan-300 tracking-wider">
                 LVL {level}
@@ -86,39 +87,32 @@ export const HUD: React.FC<HUDProps> = ({
             </div>
           </div>
 
-          {/* Right: Sensor Badges */}
-          <div className="pointer-events-auto flex items-center gap-1 rounded-xl bg-slate-950/85 p-1 shadow-lg border border-slate-800">
-            <button
-              onClick={onToggleGyro}
-              title={sensorStatus.gyroscopeActive ? 'Giroscopio Activado' : 'Activar Giroscopio'}
-              className={`rounded-lg p-1.5 transition ${
-                sensorStatus.gyroscopeActive
-                  ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-700/60'
-                  : 'bg-slate-900 text-slate-400 hover:text-white'
-              }`}
-            >
-              <Compass className="h-3.5 w-3.5" />
-            </button>
-
+          {/* Right: Sound Toggle */}
+          <div className="pointer-events-auto flex items-center gap-1 rounded-xl bg-slate-950/90 p-1 shadow-lg border border-slate-800">
             <button
               onClick={onToggleMute}
-              className="rounded-lg bg-slate-900 p-1.5 text-slate-300 hover:text-white transition"
+              className="rounded-lg bg-slate-900 p-1.5 text-slate-300 hover:text-white transition active:scale-95"
             >
               {isMuted ? <VolumeX className="h-3.5 w-3.5 text-red-400" /> : <Volume2 className="h-3.5 w-3.5 text-slate-300" />}
             </button>
           </div>
         </div>
 
-        {/* TOP CENTER: "HACERSE EL DORMIDO" BUTTON (ENLARGED & PROMINENT) */}
+        {/* TOP CENTER: "HACERSE EL DORMIDO" BUTTON (CONDITION: MUST AIM AT CUCO IN ROOM) */}
         <div className="pointer-events-auto flex flex-col items-center w-full max-w-sm px-2">
           <button
-            onPointerDown={onSleepStart}
+            onPointerDown={canSleep || isSleeping ? onSleepStart : undefined}
             onPointerUp={onSleepEnd}
             onPointerLeave={onSleepEnd}
-            className={`w-full flex items-center justify-center gap-3 rounded-2xl py-3 px-4 shadow-2xl transition-all active:scale-95 select-none ${
+            disabled={!canSleep && !isSleeping}
+            className={`w-full flex items-center justify-center gap-3 rounded-2xl py-3 px-4 shadow-2xl transition-all select-none ${
               isSleeping
                 ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white border-2 border-indigo-300 scale-95 shadow-indigo-500/50 ring-4 ring-indigo-500/30'
-                : 'bg-gradient-to-r from-indigo-950/95 to-slate-950/95 hover:from-indigo-900 hover:to-slate-900 text-indigo-100 border-2 border-indigo-500/80 shadow-indigo-950/50'
+                : canSleep
+                ? 'bg-gradient-to-r from-rose-600 via-indigo-600 to-purple-600 text-white border-2 border-yellow-300 shadow-rose-600/50 animate-pulse active:scale-95 cursor-pointer ring-2 ring-yellow-400/50'
+                : lookingAtConsole
+                ? 'bg-slate-950/80 text-slate-500 border border-slate-800 opacity-60 cursor-not-allowed'
+                : 'bg-slate-950/90 text-amber-300/80 border border-amber-500/30 opacity-75 cursor-not-allowed'
             }`}
           >
             {isSleeping ? (
@@ -129,31 +123,60 @@ export const HUD: React.FC<HUDProps> = ({
                     ¡DURMIENDO! (SOLTAR PARA VER)
                   </span>
                   <span className="text-[10px] text-indigo-200 font-sans-modern">
-                    Ojos cerrados · El Cuco no te ve
+                    Ojos cerrados · El Cuco retrocede
+                  </span>
+                </div>
+              </>
+            ) : canSleep ? (
+              <>
+                <ShieldAlert className="h-6 w-6 text-yellow-300 animate-bounce" />
+                <div className="flex flex-col items-start leading-tight text-left">
+                  <span className="font-pixel text-xs sm:text-sm tracking-wider text-white">
+                    ¡MANTÉN: HACERSE EL DORMIDO!
+                  </span>
+                  <span className="text-[10px] text-yellow-200 font-sans-modern font-semibold">
+                    ¡Cuco en la linterna! Cierra los ojos ya
+                  </span>
+                </div>
+              </>
+            ) : lookingAtConsole ? (
+              <>
+                <Gamepad2 className="h-5 w-5 text-slate-500" />
+                <div className="flex flex-col items-start leading-tight text-left">
+                  <span className="font-pixel text-[11px] text-slate-400">
+                    JUGANDO EN CONSOLA
+                  </span>
+                  <span className="text-[9.5px] text-slate-500 font-sans-modern">
+                    Para dormir, levanta la vista y mira la habitación
                   </span>
                 </div>
               </>
             ) : (
               <>
-                <Eye className="h-6 w-6 text-indigo-300" />
-                <div className="flex flex-col items-start leading-tight">
-                  <span className="font-pixel text-xs sm:text-sm tracking-wider text-white">
-                    MANTÉN: HACERSE EL DORMIDO
+                <Flashlight className="h-5 w-5 text-amber-400 animate-pulse" />
+                <div className="flex flex-col items-start leading-tight text-left">
+                  <span className="font-pixel text-[11px] text-amber-300">
+                    APUNTA AL CUCO CON LA LINTERNA
                   </span>
-                  <span className="text-[10px] text-indigo-300/90 font-sans-modern">
-                    Tapa tus ojos con la frazada
+                  <span className="text-[9.5px] text-slate-400 font-sans-modern">
+                    Ilumínalo hasta que parpadee la luz para poder dormirte
                   </span>
                 </div>
               </>
             )}
           </button>
 
-          {/* Intuitive Sleep Progress Bar without mentioning seconds */}
-          <div className="mt-1.5 w-full rounded-xl bg-slate-950/90 p-2 shadow-lg border border-slate-800/90">
+          {/* Intuitive Sleep Progress Bar - ALWAYS VISIBLE EVEN WHEN SLEEPING */}
+          <div className="mt-1.5 w-full rounded-xl bg-slate-950/95 p-2 shadow-2xl border border-slate-800/90 ring-1 ring-black">
             <div className="flex items-center justify-between text-[9px] uppercase font-sans-modern font-bold tracking-wide">
               <span className="flex items-center gap-1.5 text-slate-300">
                 <Moon className={`h-3 w-3 ${isHighBoredom ? 'text-amber-400' : 'text-indigo-400'}`} />
                 <span>Nivel de Sueño:</span>
+                {isSleeping && (
+                  <span className="ml-1 text-[8px] text-indigo-300 font-normal font-sans-modern bg-indigo-950 px-1.5 py-0.5 rounded-full border border-indigo-700/50">
+                    Avanzando lento...
+                  </span>
+                )}
               </span>
               <span
                 className={`font-pixel text-[9px] flex items-center gap-1 ${

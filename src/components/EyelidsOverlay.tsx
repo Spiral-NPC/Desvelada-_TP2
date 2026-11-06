@@ -42,7 +42,7 @@ export const EyelidsOverlay: React.FC<EyelidsOverlayProps> = ({ isSleeping }) =>
 
       {/* Center Darkness & Sleeping Visual Cue */}
       <div
-        className={`absolute inset-0 flex flex-col items-center justify-center transition-opacity duration-300 ${
+        className={`absolute inset-0 flex flex-col items-center justify-center pt-28 transition-opacity duration-300 ${
           isSleeping ? 'opacity-100 delay-150' : 'opacity-0'
         }`}
       >

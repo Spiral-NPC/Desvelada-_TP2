@@ -5,8 +5,6 @@ export type GameMode = 'classic' | 'infinite';
 export type MiniGameType = 'space';
 
 export type SensorStatus = {
-  gyroscopeAllowed: boolean;
-  gyroscopeActive: boolean;
   hapticsSupported: boolean;
 };
 

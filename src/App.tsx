@@ -12,7 +12,6 @@ import { RoomScene } from './three/RoomScene';
 import { HUD } from './components/HUD';
 import { ConsoleControls } from './components/ConsoleControls';
 import { PermissionsModal } from './components/PermissionsModal';
-import { GameOverModal } from './components/GameOverModal';
 import { VictoryModal } from './components/VictoryModal';
 import { RotatePrompt } from './components/RotatePrompt';
 import { EyelidsOverlay } from './components/EyelidsOverlay';
@@ -26,6 +25,8 @@ export default function App() {
 
   // Game state
   const [gameState, setGameState] = useState<GameState>('intro');
+  const gameStateRef = useRef<GameState>(gameState);
+  gameStateRef.current = gameState;
   const [boredom, setBoredom] = useState<number>(15);
   const [isSleeping, setIsSleeping] = useState<boolean>(false);
   const [lookingAtConsole, setLookingAtConsole] = useState<boolean>(true);
@@ -51,21 +52,19 @@ export default function App() {
 
   const modeRef = useRef<GameMode>('classic');
 
-  // Sensor states
-  const [sensorStatus, setSensorStatus] = useState<SensorStatus>({
-    gyroscopeAllowed: false,
-    gyroscopeActive: false,
+  // Sensor states (tactile only, gyroscope removed)
+  const [sensorStatus] = useState<SensorStatus>({
     hapticsSupported: typeof navigator !== 'undefined' && 'vibrate' in navigator,
   });
+
+  const [cucoInBeam, setCucoInBeam] = useState<boolean>(false);
+  const [lossNotice, setLossNotice] = useState<'cuco' | 'sleep' | null>(null);
 
   // Camera orientation angles (Euler radians)
   const cameraYaw = useRef<number>(0);
   const cameraPitch = useRef<number>(-0.45); // start looking down at console
   const targetYaw = useRef<number>(0);
   const targetPitch = useRef<number>(-0.45);
-
-  // Gyroscope tracking
-  const gyroBaseAlpha = useRef<number | null>(null);
 
   // Monster tracking (Pool of active monsters for classic and infinite modes)
   const monstersRef = useRef<ActiveMonster[]>([]);
@@ -125,67 +124,45 @@ export default function App() {
     };
   }, []);
 
-  // --- SENSOR PERMISSIONS & START GAME ---
-  const handleStartGame = async (options: {
-    enableGyro: boolean;
-    mode: GameMode;
-  }) => {
+  // Start menu ambient music on initial user interaction with the intro screen
+  useEffect(() => {
+    const handleFirstGesture = () => {
+      soundEngine.init();
+      if (gameStateRef.current === 'intro' && !soundEngine.isGameOverPlaying()) {
+        soundEngine.playAmbienteMusic();
+      }
+    };
+    window.addEventListener('pointerdown', handleFirstGesture, { once: true });
+    window.addEventListener('keydown', handleFirstGesture, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', handleFirstGesture);
+      window.removeEventListener('keydown', handleFirstGesture);
+    };
+  }, []);
+
+  // --- START GAME (Touch only) ---
+  const handleStartGame = (options: { mode: GameMode }) => {
     soundEngine.init();
+    soundEngine.stopGameOverMusic();
+    soundEngine.stopAmbienteMusic();
+    setLossNotice(null);
     modeRef.current = options.mode;
     setStats((prev) => ({ ...prev, mode: options.mode }));
+    setBoredom(15);
+    setIsSleeping(false);
+    setLookingAtConsole(true);
+    targetPitch.current = -0.45;
+    targetYaw.current = 0;
+    monstersRef.current = [];
+    attackingMonsterId.current = null;
+    cucoSpawnCountdown.current = 3.5;
+    jumpscareTimer.current = 0;
+    setShowGameOver(false);
+    sceneRef.current?.hideAllCucos();
+    miniGameRef.current?.reset(false);
+    // Player starts looking at console, play console track
+    soundEngine.playConsolaMusic();
     setGameState('playing');
-
-    // Gyroscope setup
-    if (options.enableGyro && typeof window !== 'undefined') {
-      try {
-        const DeviceOrientationEventAny = window.DeviceOrientationEvent as unknown as {
-          requestPermission?: () => Promise<'granted' | 'denied'>;
-        };
-
-        if (typeof DeviceOrientationEventAny?.requestPermission === 'function') {
-          const perm = await DeviceOrientationEventAny.requestPermission();
-          if (perm === 'granted') {
-            setupGyroscope();
-          }
-        } else {
-          setupGyroscope();
-        }
-      } catch (err) {
-        console.warn('Gyroscope permission failed:', err);
-      }
-    }
-  };
-
-  // Setup Gyroscope event listener
-  const setupGyroscope = () => {
-    window.addEventListener('deviceorientation', handleDeviceOrientation);
-    setSensorStatus((s) => ({ ...s, gyroscopeAllowed: true, gyroscopeActive: true }));
-  };
-
-  const handleDeviceOrientation = (e: DeviceOrientationEvent) => {
-    if (e.alpha === null || e.beta === null) return;
-
-    if (gyroBaseAlpha.current === null) {
-      gyroBaseAlpha.current = e.alpha;
-    }
-
-    // Relative yaw in radians
-    const diffAlpha = (e.alpha - gyroBaseAlpha.current) * (Math.PI / 180);
-    // Beta: pitch (-180 to 180). Map natural holding angle (~45 deg) to horizon (0 rad)
-    const betaRad = (e.beta - 45) * (Math.PI / 180);
-
-    targetYaw.current = -diffAlpha;
-    targetPitch.current = Math.max(-1.1, Math.min(0.8, -betaRad));
-  };
-
-  // Toggle Gyroscope
-  const toggleGyroscope = async () => {
-    if (sensorStatus.gyroscopeActive) {
-      window.removeEventListener('deviceorientation', handleDeviceOrientation);
-      setSensorStatus((s) => ({ ...s, gyroscopeActive: false }));
-    } else {
-      setupGyroscope();
-    }
   };
 
   // Toggle Mute
@@ -206,12 +183,18 @@ export default function App() {
     }
   }, [lookingAtConsole]);
 
-  // Feign Sleep actions ("FINGIR DORMIR")
+  // Feign Sleep actions ("HACERSE EL DORMIDO")
+  // USER REQUIREMENTS:
+  // 1. Al jugar en la consola NO te podés hacer el dormido
+  // 2. Para hacerte el dormido tenés que apuntar al Cuco con la linterna (verlo)
   const startSleeping = useCallback(() => {
     if (gameState !== 'playing') return;
+    if (lookingAtConsole) return;
+    if (!sceneRef.current?.isCucoInFlashlightBeam) return;
+
     setIsSleeping(true);
     soundEngine.playFeignSleep();
-  }, [gameState]);
+  }, [gameState, lookingAtConsole]);
 
   const endSleeping = useCallback(() => {
     setIsSleeping(false);
@@ -263,7 +246,7 @@ export default function App() {
     };
   }, [gameState, toggleLook, startSleeping, endSleeping]);
 
-  // Touch / Pointer Drag for 360 degree room rotation
+  // Touch / Pointer Drag for room rotation
   const handlePointerDown = (e: React.PointerEvent) => {
     if (gameState !== 'playing') return;
     if ((e.target as HTMLElement).closest('button, input, select')) return;
@@ -279,9 +262,11 @@ export default function App() {
     lastTouchX.current = e.clientX;
     lastTouchY.current = e.clientY;
 
-    const sensitivity = 0.004;
-    targetYaw.current -= deltaX * sensitivity;
-    targetPitch.current = Math.max(-1.1, Math.min(0.85, targetPitch.current - deltaY * sensitivity));
+    const sensitivity = 0.0035;
+    // USER REQUIREMENT: Impedir al jugador ver los bordes o parte negra de la imagen
+    // Clamped strictly to [-1.10, 1.10] radians (~ -63° to +63°) and pitch to [-0.55, 0.35]
+    targetYaw.current = Math.max(-1.10, Math.min(1.10, targetYaw.current - deltaX * sensitivity));
+    targetPitch.current = Math.max(-0.55, Math.min(0.35, targetPitch.current - deltaY * sensitivity));
   };
 
   const handlePointerUp = () => {
@@ -290,6 +275,8 @@ export default function App() {
 
   // Restart game after GameOver
   const handleRestart = () => {
+    soundEngine.stopGameOverMusic();
+    soundEngine.stopAmbienteMusic();
     setBoredom(15);
     setIsSleeping(false);
     setLookingAtConsole(true);
@@ -321,11 +308,17 @@ export default function App() {
       mode: stats.mode,
       highScore: savedBest,
     });
+    soundEngine.playConsolaMusic();
     setGameState('playing');
   };
 
-  // Return to Initial Start Menu
+  // Return to Initial Start Menu & Reset all game states
   const handleMainMenu = () => {
+    soundEngine.stopConsolaMusic();
+    // USER REQUIREMENT: "ambiente.mp3" sea la canción del menú, y evitar que se reproduzca al mismo tiempo que game over.mp3
+    if (!soundEngine.isGameOverPlaying()) {
+      soundEngine.playAmbienteMusic();
+    }
     setBoredom(15);
     setIsSleeping(false);
     setLookingAtConsole(true);
@@ -392,6 +385,19 @@ export default function App() {
         const isLookingDown = cameraPitch.current < -0.22;
         setLookingAtConsole(isLookingDown);
 
+        // USER REQUIREMENT: Audio management:
+        // When playing on console, play "consola.mp3".
+        // In the room, "ambiente.mp3" is REMOVED from the room entirely!
+        if (gameState === 'playing') {
+          if (isLookingDown) {
+            soundEngine.playConsolaMusic();
+          } else {
+            // "eliminala de la habitacion"
+            soundEngine.stopConsolaMusic();
+            soundEngine.stopAmbienteMusic();
+          }
+        }
+
         // PAUSE / RESUME MINIGAME:
         // When looking down, minigame runs active!
         // When looking up at the room OR feigning sleep, minigame pauses immediately!
@@ -418,6 +424,8 @@ export default function App() {
               // Check 6:00 AM Dawn victory ONLY in classic mode!
               // In infinite mode, the night never ends!
               if (prev.mode === 'classic' && hour >= 6) {
+                soundEngine.stopAmbienteMusic();
+                soundEngine.stopConsolaMusic();
                 soundEngine.playVictoryFanfare();
                 setGameState('victory');
               }
@@ -432,15 +440,20 @@ export default function App() {
 
           // --- Boredom / Sleep Meter Logic ---
           // USER REQUIREMENT: Sleep meter takes 10 SECONDS without playing to reach 100%!
-          // When feigning sleep (eyes closed), it advances FASTER (~7.5s to 100%) without being exaggerated!
+          // When feigning sleep (eyes closed), it continues advancing a bit SLOWER than normal speed (~14s to reach 100%):
           if (isSleeping) {
             setBoredom((prev) => {
-              const next = prev + (100 / 7.5) * dt;
+              const next = prev + (100 / 14.0) * dt;
               if (next >= 100) {
                 soundEngine.playSleepFall();
-                setGameState('slept');
-                setShowGameOver(true);
-                return 100;
+                soundEngine.playGameOverMusic(() => {
+                  if (gameStateRef.current === 'intro') {
+                    soundEngine.playAmbienteMusic();
+                  }
+                });
+                setLossNotice('sleep');
+                handleMainMenu();
+                return 15;
               }
               return next;
             });
@@ -454,9 +467,14 @@ export default function App() {
               const next = prev + (100 / 10.0) * dt;
               if (next >= 100) {
                 soundEngine.playSleepFall();
-                setGameState('slept');
-                setShowGameOver(true);
-                return 100;
+                soundEngine.playGameOverMusic(() => {
+                  if (gameStateRef.current === 'intro') {
+                    soundEngine.playAmbienteMusic();
+                  }
+                });
+                setLossNotice('sleep');
+                handleMainMenu();
+                return 15;
               }
               return next;
             });
@@ -495,7 +513,7 @@ export default function App() {
               soundEngine.playCucoSpawnWarning();
             }
 
-            // USER REQUIREMENT: Frecuencia mucho más alta, aprox cada 5-10 segundos!
+            // High spawn frequency, approximately every 5-10 seconds!
             cucoSpawnCountdown.current = isInfinite
               ? (4.0 + Math.random() * 4.0) // 4 to 8s
               : (5.0 + Math.random() * 5.0); // 5 to 10s!
@@ -540,6 +558,9 @@ export default function App() {
                     targetYaw.current = -Math.atan2(loc.pos[0], -loc.pos[2]);
                   }
 
+                  // Stop gameplay audio immediately on jump
+                  soundEngine.stopAmbienteMusic();
+                  soundEngine.stopConsolaMusic();
                   soundEngine.playJumpscare();
                   soundEngine.triggerHaptic([100, 50, 150, 50, 250]);
                   break;
@@ -548,9 +569,9 @@ export default function App() {
             }
           }
         } else if (gameState === 'jumpscare') {
-          // Play out 1.3 seconds of terrifying visceral jumpscare!
+          // Play out 1.2 seconds of visceral terrifying jumpscare!
           jumpscareTimer.current += dt;
-          const progress = Math.min(1.0, jumpscareTimer.current / 1.3);
+          const progress = Math.min(1.0, jumpscareTimer.current / 1.2);
 
           const attacker =
             monstersRef.current.find((m) => m.id === attackingMonsterId.current) ||
@@ -564,14 +585,24 @@ export default function App() {
           cameraYaw.current += (Math.random() - 0.5) * 0.06;
           cameraPitch.current += (Math.random() - 0.5) * 0.06;
 
-          // After full 1.3s jumpscare animation, show GameOver modal
-          if (jumpscareTimer.current >= 1.3 && !showGameOver) {
-            setShowGameOver(true);
+          // USER REQUIREMENT: Al perder por ataque de Cuco, se reproduce "game over.mp3" una única vez,
+          // el resto de mp3s dejan de sonar, devolve al jugador al menú principal y reinicia todos los estados del juego!
+          // Cuando game over.mp3 termine, se reproduce la canción del menú (ambiente.mp3).
+          if (jumpscareTimer.current >= 1.2) {
+            soundEngine.playGameOverMusic(() => {
+              if (gameStateRef.current === 'intro') {
+                soundEngine.playAmbienteMusic();
+              }
+            });
+            setLossNotice('cuco');
+            handleMainMenu();
           }
         }
 
         // 3. Update Scene & Handheld Console
         scene.update(dt, isLookingDown, cameraPitch.current);
+        // Track whether player is aiming flashlight at Cuco in the dark room
+        setCucoInBeam(scene.isCucoInFlashlightBeam && !isLookingDown);
       }
 
       animId = requestAnimationFrame(loop);
@@ -598,13 +629,24 @@ export default function App() {
       {/* Three.js Canvas Mount Container */}
       <div ref={mountRef} className="absolute inset-0 h-full w-full" />
 
-      {/* --- NARROW FLASHLIGHT VIGNETTE (Small focused radius in dark room) --- */}
+      {/* --- SMALLER FLASHLIGHT RADIUS & MUCH DARKER ROOM VIGNETTE --- */}
       {!lookingAtConsole && !isSleeping && gameState === 'playing' && (
         <div
           className="pointer-events-none fixed inset-0 z-10 transition-opacity duration-300"
           style={{
             background:
-              'radial-gradient(circle at center, rgba(255, 245, 225, 0.05) 0%, rgba(255, 240, 210, 0.02) 12%, rgba(0, 0, 0, 0.65) 24%, rgba(0, 0, 0, 0.96) 40%, #000000 60%)',
+              'radial-gradient(circle at center, rgba(255, 245, 225, 0.03) 0%, rgba(255, 240, 210, 0.01) 6%, rgba(0, 0, 0, 0.78) 16%, rgba(0, 0, 0, 0.98) 28%, #000000 45%)',
+          }}
+        />
+      )}
+
+      {/* --- RETRO CRT STATIC / FILM GRAIN SCREEN OVERLAY (active only when looking at console) --- */}
+      {lookingAtConsole && gameState === 'playing' && (
+        <div
+          className="pointer-events-none fixed inset-0 z-10 opacity-30 mix-blend-overlay"
+          style={{
+            background:
+              'repeating-linear-gradient(0deg, rgba(0,0,0,0.18) 0px, rgba(0,0,0,0.18) 1px, transparent 1px, transparent 2px)',
           }}
         />
       )}
@@ -634,12 +676,12 @@ export default function App() {
             level={stats.level}
             mode={stats.mode}
             lookingAtConsole={lookingAtConsole}
+            cucoInBeam={cucoInBeam}
             isSleeping={isSleeping}
             onSleepStart={startSleeping}
             onSleepEnd={endSleeping}
             onToggleLook={toggleLook}
             sensorStatus={sensorStatus}
-            onToggleGyro={toggleGyroscope}
             isMuted={isMuted}
             onToggleMute={toggleMute}
           />
@@ -661,11 +703,13 @@ export default function App() {
         </>
       )}
 
-      {/* --- WELCOME & PERMISSIONS MODAL --- */}
+      {/* --- WELCOME & PERMISSIONS MODAL (with Defeat Banner on Return) --- */}
       {gameState === 'intro' && (
         <PermissionsModal
           onStartGame={handleStartGame}
           sensorStatus={sensorStatus}
+          lossNotice={lossNotice}
+          lastStats={stats}
         />
       )}
 
@@ -690,16 +734,6 @@ export default function App() {
             </div>
           </div>
         </div>
-      )}
-
-      {/* --- GAME OVER SCREENS --- */}
-      {(gameState === 'slept' || (gameState === 'jumpscare' && showGameOver)) && (
-        <GameOverModal
-          reason={gameState === 'jumpscare' ? 'jumpscare' : 'slept'}
-          stats={stats}
-          onRestart={handleRestart}
-          onMainMenu={handleMainMenu}
-        />
       )}
 
       {/* --- VICTORY 6 AM SCREEN --- */}

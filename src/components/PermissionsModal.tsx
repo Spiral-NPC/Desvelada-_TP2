@@ -6,7 +6,6 @@
 
 import React, { useState } from 'react';
 import {
-  Compass,
   Moon,
   Clock,
   Infinity as InfinityIcon,
@@ -16,20 +15,32 @@ import {
   AlertTriangle,
   Play,
   Smartphone,
+  Touchpad,
 } from 'lucide-react';
-import { SensorStatus, GameMode } from '../types';
+import { SensorStatus, GameMode, GameStats } from '../types';
+import { soundEngine } from '../audio/SoundEngine';
 
 interface PermissionsModalProps {
-  onStartGame: (options: { enableGyro: boolean; mode: GameMode }) => void;
+  onStartGame: (options: { mode: GameMode }) => void;
   sensorStatus: SensorStatus;
+  lossNotice?: 'cuco' | 'sleep' | null;
+  lastStats?: GameStats;
 }
 
 export const PermissionsModal: React.FC<PermissionsModalProps> = ({
   onStartGame,
+  lossNotice,
+  lastStats,
 }) => {
   const [selectedMode, setSelectedMode] = useState<GameMode>('classic');
-  const [requestGyro, setRequestGyro] = useState(true);
   const [step, setStep] = useState<'welcome' | 'instructions'>('welcome');
+
+  const triggerMenuMusic = () => {
+    soundEngine.init();
+    if (!soundEngine.isGameOverPlaying()) {
+      soundEngine.playAmbienteMusic();
+    }
+  };
 
   const handleStart = async () => {
     // Attempt landscape screen orientation lock if supported on mobile
@@ -47,13 +58,15 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({
     } catch {}
 
     onStartGame({
-      enableGyro: requestGyro,
       mode: selectedMode,
     });
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 backdrop-blur-md overflow-y-auto">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 backdrop-blur-md overflow-y-auto"
+      onPointerDown={triggerMenuMusic}
+    >
       <div className="relative w-full max-w-md rounded-3xl bg-slate-950 p-6 text-slate-100 shadow-2xl border border-slate-800">
         {/* Glow accent */}
         <div className="absolute -top-12 left-1/2 -translate-x-1/2 h-24 w-48 rounded-full bg-pink-600/20 blur-3xl pointer-events-none" />
@@ -73,6 +86,33 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({
                 {selectedMode === 'classic' ? 'SOBREVIVE HASTA LAS 6:00 AM' : 'NOCHE ETERNA: PUNTUACIÓN MÁXIMA'}
               </p>
             </div>
+
+            {/* Defeat Banner (when returned to menu after losing) */}
+            {lossNotice && (
+              <div
+                className={`rounded-2xl p-3 text-left border shadow-lg animate-in fade-in ${
+                  lossNotice === 'cuco'
+                    ? 'bg-red-950/70 border-red-600/60 text-red-200'
+                    : 'bg-indigo-950/70 border-indigo-600/60 text-indigo-200'
+                }`}
+              >
+                <div className="flex items-center gap-2 font-pixel text-xs text-white">
+                  {lossNotice === 'cuco' ? '💀 ¡EL CUCO TE ATRAPÓ!' : '🌙 ¡TE QUEDASTE DORMIDO!'}
+                </div>
+                <div className="text-[10px] text-slate-300 font-sans-modern mt-1 leading-snug">
+                  {lossNotice === 'cuco'
+                    ? 'El monstruo te sorprendió. Has vuelto al menú principal y todos los estados del juego se han reiniciado.'
+                    : 'El medidor de sueño llegó al 100%. Has vuelto al menú principal y todos los estados del juego se han reiniciado.'}
+                </div>
+                {lastStats && (
+                  <div className="mt-2 flex items-center justify-between text-[9px] font-pixel text-slate-400 bg-black/50 px-2 py-1 rounded-lg">
+                    <span>Puntuación: {lastStats.score} pts</span>
+                    <span>Hora: {lastStats.currentHour === 0 ? '12 AM' : `${lastStats.currentHour} AM`}</span>
+                    <span>Burlados: {lastStats.monstersRepelled}</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* --- GAME MODE SELECTOR --- */}
             <div className="text-left space-y-2">
@@ -129,33 +169,25 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({
             </div>
 
             {/* Sensor Permissions Preferences */}
+            {/* Tactile Controls Info */}
             <div className="space-y-2 text-left">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 font-sans-modern">
-                Sensores del Dispositivo (Opcional):
+                Control de Cámara:
               </span>
 
-              {/* Gyroscope toggle */}
-              <label className="flex items-center justify-between rounded-xl border border-slate-800/80 bg-slate-900/40 p-2.5 cursor-pointer hover:bg-slate-900/70 transition">
-                <div className="flex items-center gap-2.5">
-                  <div className="rounded-lg bg-emerald-950/60 p-1.5 text-emerald-400 border border-emerald-800/40">
-                    <Compass className="h-3.5 w-3.5" />
+              <div className="flex items-center gap-2.5 rounded-xl border border-slate-800/80 bg-slate-900/40 p-2.5">
+                <div className="rounded-lg bg-emerald-950/60 p-1.5 text-emerald-400 border border-emerald-800/40">
+                  <Touchpad className="h-4 w-4" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-white font-sans-modern">
+                    Controles 100% Táctiles
                   </div>
-                  <div>
-                    <div className="text-xs font-semibold text-white font-sans-modern">
-                      Giroscopio / Movimiento 360°
-                    </div>
-                    <div className="text-[10px] text-slate-400">
-                      Gira tu teléfono físicamente para mirar alrededor
-                    </div>
+                  <div className="text-[10px] text-slate-400">
+                    Desliza tu dedo o ratón para mover la linterna por la habitación
                   </div>
                 </div>
-                <input
-                  type="checkbox"
-                  checked={requestGyro}
-                  onChange={(e) => setRequestGyro(e.target.checked)}
-                  className="h-4 w-4 rounded accent-emerald-500 cursor-pointer"
-                />
-              </label>
+              </div>
             </div>
 
             {/* Mandatory Landscape Warning Banner for Mobile & Tablets */}
@@ -201,9 +233,9 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({
               <div className="flex items-start gap-2.5 rounded-xl bg-slate-900/60 p-2.5 border border-slate-800">
                 <Gamepad2 className="h-4 w-4 shrink-0 text-cyan-400 mt-0.5" />
                 <div>
-                  <strong className="text-white">1. Medidor de Sueño (10 Segundos):</strong>
+                  <strong className="text-white">1. Medidor de Sueño y Consola:</strong>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    Al pasar <strong className="text-cyan-300">10 segundos sin jugar en la consola</strong>, te quedas dormido y pierdes. Jugar en Space Invaders drena el sueño.
+                    Al pasar tiempo sin jugar te quedas dormido. Jugar en Space Invaders drena el sueño. <strong className="text-pink-300">Al jugar en la consola NO puedes hacerte el dormido.</strong>
                   </p>
                 </div>
               </div>
@@ -211,9 +243,9 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({
               <div className="flex items-start gap-2.5 rounded-xl bg-slate-900/60 p-2.5 border border-slate-800">
                 <Eye className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" />
                 <div>
-                  <strong className="text-white">2. Habitación a oscuras y linterna:</strong>
+                  <strong className="text-white">2. Apuntar al Cuco con la linterna:</strong>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    Al levantar la vista, la consola se pausa automáticamente. Usa la linterna de radio estrecho para alumbrar los rincones de la habitación.
+                    Levanta la vista y recorre la habitación. Para poder hacerte el dormido, <strong className="text-amber-300">debes apuntar la linterna hacia el Cuco</strong>. ¡La linterna comenzará a parpadear para alertarte!
                   </p>
                 </div>
               </div>
@@ -221,9 +253,9 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({
               <div className="flex items-start gap-2.5 rounded-xl bg-slate-900/60 p-2.5 border border-slate-800">
                 <AlertTriangle className="h-4 w-4 shrink-0 text-red-400 mt-0.5" />
                 <div>
-                  <strong className="text-white">3. El Cuco y Modo Infinito:</strong>
+                  <strong className="text-white">3. Hacerse el Dormido:</strong>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    El Cuco no hace ruido ni avisa con interfaz. Si lo ves acechando, mantén <span className="text-indigo-300 font-bold">FINGIR DORMIR</span> con la frazada. En modo Infinito pueden aparecer varios a la vez en 10 escondites distintos.
+                    Cuando veas al Cuco y parpadee tu linterna, mantén <span className="text-indigo-300 font-bold">HACERSE EL DORMIDO</span>. La barra de sueño seguirá visible y continuará avanzando un poco más lento hasta que el Cuco se aleje.
                   </p>
                 </div>
               </div>

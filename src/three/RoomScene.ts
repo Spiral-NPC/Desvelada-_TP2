@@ -32,7 +32,7 @@ export class RoomScene {
   public camera: THREE.PerspectiveCamera;
   public renderer: THREE.WebGLRenderer;
   public consoleMeshGroup: THREE.Group;
-  public consoleScreenMaterial: THREE.MeshBasicMaterial;
+  public consoleScreenMaterial: THREE.ShaderMaterial;
   public screenTexture: THREE.CanvasTexture;
   public cucoMonster: THREE.Group;
   public cucoPool: CucoInstance[] = [];
@@ -41,7 +41,9 @@ export class RoomScene {
   public roomGroup: THREE.Group;
   public flashlight: THREE.SpotLight;
   public flashlightTarget: THREE.Object3D;
+  public isCucoInFlashlightBeam: boolean = false;
   private _camDir = new THREE.Vector3();
+  private _toCucoVec = new THREE.Vector3();
 
   // Lighting
   public lampLight: THREE.PointLight;
@@ -49,6 +51,8 @@ export class RoomScene {
 
   private isSoftwareGl: boolean;
   private dustParticles: THREE.Points;
+  private dustSpeeds: Float32Array = new Float32Array(0);
+  private dustBasePositions: Float32Array = new Float32Array(0);
 
   // Cuco spawn anchor locations matching the panoramic reference image Bedroom.webp
   public static readonly LOCATIONS: Record<MonsterLocation, { pos: [number, number, number]; rotY: number }> = {
@@ -89,9 +93,9 @@ export class RoomScene {
       }
     })();
 
-    // Scene setup - Dark atmospheric bedroom
+    // Scene setup - Extremely dark atmospheric bedroom
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.FogExp2(0x0a050d, 0.045);
+    this.scene.fog = new THREE.FogExp2(0x040206, 0.08);
 
     // Camera at player eye level on the bed
     // FOV 60 ensures player must pan/sweep to see both sides of the large bedroom
@@ -106,7 +110,7 @@ export class RoomScene {
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 1.0;
     this.renderer.setPixelRatio(this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = !this.isSoftwareGl;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -118,17 +122,17 @@ export class RoomScene {
     this.scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.01).texture;
     pmremGenerator.dispose();
 
-    // Dark moody ambient room lighting (faint purple/mauve tint matching bedroom palette)
-    this.ambientNightLight = new THREE.HemisphereLight(0x2d1b32, 0x050208, 0.22);
+    // Dark moody ambient room lighting (dimmed significantly for intense darkness)
+    this.ambientNightLight = new THREE.HemisphereLight(0x110715, 0x010002, 0.06);
     this.scene.add(this.ambientNightLight);
 
-    // Bedside lamp (soft warm glow on right nightstand)
-    this.lampLight = new THREE.PointLight(0xffbe6b, 0.65, 5.0, 2);
+    // Bedside lamp (faint amber glow on right nightstand)
+    this.lampLight = new THREE.PointLight(0xffbe6b, 0.22, 3.2, 2);
     this.lampLight.position.set(2.0, 1.2, 0.2);
     this.scene.add(this.lampLight);
 
-    // Flashlight (tight focused beam reaching 24m across the large room)
-    this.flashlight = new THREE.SpotLight(0xffeedd, 9.0, 24, Math.PI / 5.2, 0.35, 1.4);
+    // Flashlight (narrow, smaller focused beam radius: Math.PI / 8.8 ~20.4 deg)
+    this.flashlight = new THREE.SpotLight(0xffedd5, 10.0, 22, Math.PI / 8.8, 0.22, 1.6);
     this.flashlight.position.copy(this.camera.position);
     this.flashlight.castShadow = !this.isSoftwareGl;
     if (!this.isSoftwareGl) {
@@ -192,8 +196,64 @@ export class RoomScene {
     this.screenTexture.colorSpace = THREE.SRGBColorSpace;
     this.screenTexture.minFilter = THREE.LinearFilter;
     this.screenTexture.magFilter = THREE.NearestFilter;
-    this.consoleScreenMaterial = new THREE.MeshBasicMaterial({
-      map: this.screenTexture,
+    // Retro CRT & Film Grain Shader Material for handheld console screen
+    this.consoleScreenMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        tDiffuse: { value: this.screenTexture },
+        time: { value: 0.0 },
+        staticMix: { value: 0.0 },
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform sampler2D tDiffuse;
+        uniform float time;
+        uniform float staticMix;
+        varying vec2 vUv;
+
+        // Pseudo-random noise hash
+        float hash(vec2 p) {
+          p = fract(p * vec2(123.34, 456.21));
+          p += dot(p, p + 45.32);
+          return fract(p.x * p.y);
+        }
+
+        void main() {
+          vec2 uv = vUv;
+          
+          // Subtle retro CRT barrel curvature distortion when looking at console
+          vec2 centered = uv - 0.5;
+          float dist = dot(centered, centered);
+          vec2 curvedUv = uv + centered * (dist * 0.07 * staticMix);
+          
+          if (curvedUv.x < 0.0 || curvedUv.x > 1.0 || curvedUv.y < 0.0 || curvedUv.y > 1.0) {
+            gl_FragColor = vec4(0.01, 0.02, 0.03, 1.0);
+            return;
+          }
+          
+          vec4 color = texture2D(tDiffuse, curvedUv);
+          
+          // Animated film grain / static noise (active only when looking at console)
+          float noise = hash(curvedUv * 280.0 + fract(time * 43.0));
+          float grain = (noise - 0.5) * 0.18 * staticMix;
+          
+          // Subtle phosphor scanlines
+          float scanline = sin(curvedUv.y * 360.0) * 0.06 * staticMix;
+          
+          vec3 finalColor = color.rgb + vec3(grain) - vec3(scanline);
+          
+          // Subtle edge vignette
+          float vignette = smoothstep(0.72, 0.42, length(centered));
+          finalColor *= mix(1.0, vignette * 1.04, staticMix * 0.35);
+          
+          gl_FragColor = vec4(finalColor, 1.0);
+        }
+      `,
       side: THREE.DoubleSide,
       toneMapped: false,
     });
@@ -211,13 +271,13 @@ export class RoomScene {
   // --- BUILD LARGE 3D BEDROOM BASED ON Bedroom.webp ---
   private buildRoom() {
     // 1. Panoramic Curved Backdrop Wall
-    // Cylindrical cylinder wrapping ~240 degrees (4.2 radians)
-    // Radius = 9.8m, Height = 7.2m
-    const radius = 9.8;
-    const height = 7.2;
-    const segments = 64;
-    const arcAngle = 4.2; // ~240 degrees of horizontal panoramic view
-    const startAngle = -Math.PI / 2 - arcAngle / 2; // centered looking down -Z
+    // Cylindrical cylinder wrapping ~310 degrees (5.4 radians)
+    // Radius = 10.0m, Height = 8.5m, centered looking straight down -Z (startAngle = Math.PI - arcAngle / 2)
+    const radius = 10.0;
+    const height = 8.5;
+    const segments = 72;
+    const arcAngle = 5.4; // 5.4 radians (~310°) provides full expansive coverage
+    const startAngle = Math.PI - arcAngle / 2; // PROPERLY CENTERED LOOKING DOWN -Z!
 
     const panoGeo = new THREE.CylinderGeometry(
       radius,
@@ -253,11 +313,11 @@ export class RoomScene {
     });
 
     const panoMesh = new THREE.Mesh(panoGeo, panoMat);
-    panoMesh.position.set(0, 2.2, 0);
+    panoMesh.position.set(0, 3.0, 0);
     this.roomGroup.add(panoMesh);
 
     // 2. Large Bedroom Floor (carpet mauve/maroon tone matching Bedroom.webp)
-    const floorGeo = new THREE.CircleGeometry(11.5, 48);
+    const floorGeo = new THREE.CircleGeometry(12.5, 48);
     const floorMat = new THREE.MeshStandardMaterial({
       color: 0x3d2030,
       roughness: 0.85,
@@ -265,19 +325,19 @@ export class RoomScene {
     });
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
-    floor.position.set(0, -0.05, -2.5);
+    floor.position.set(0, -0.05, 0);
     floor.receiveShadow = !this.isSoftwareGl;
     this.roomGroup.add(floor);
 
     // 3. Ceiling plane
-    const ceilGeo = new THREE.CircleGeometry(11.5, 48);
+    const ceilGeo = new THREE.CircleGeometry(12.5, 48);
     const ceilMat = new THREE.MeshStandardMaterial({
       color: 0x221326,
       roughness: 0.9,
     });
     const ceiling = new THREE.Mesh(ceilGeo, ceilMat);
     ceiling.rotation.x = Math.PI / 2;
-    ceiling.position.set(0, 5.75, -2.5);
+    ceiling.position.set(0, 6.2, 0);
     this.roomGroup.add(ceiling);
 
     // Ceiling Lamp Fixture (centered at ceiling matching Bedroom.webp)
@@ -623,24 +683,65 @@ export class RoomScene {
     return consoleGroup;
   }
 
-  // --- FLOATING MOONLIT DUST MOTES ---
+  // --- PROCEDURAL SOFT CIRCULAR DUST PARTICLE TEXTURE ---
+  private createDustTexture(): THREE.CanvasTexture {
+    const canvas = document.createElement('canvas');
+    canvas.width = 32;
+    canvas.height = 32;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      const gradient = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+      gradient.addColorStop(0, 'rgba(255, 248, 230, 1.0)');
+      gradient.addColorStop(0.3, 'rgba(240, 225, 195, 0.7)');
+      gradient.addColorStop(0.7, 'rgba(200, 185, 165, 0.25)');
+      gradient.addColorStop(1, 'rgba(200, 185, 165, 0.0)');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, 32, 32);
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    return texture;
+  }
+
+  // --- FLOATING MOONLIT DUST MOTES (REACTING TO CAMERA FOR DEPTH PERCEPTION) ---
   private buildDustParticles(): THREE.Points {
-    const count = 120;
+    const count = 260;
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(count * 3);
+    this.dustBasePositions = new Float32Array(count * 3);
+    this.dustSpeeds = new Float32Array(count * 3);
 
     for (let i = 0; i < count; i++) {
-      positions[i * 3] = (Math.random() - 0.5) * 12;
-      positions[i * 3 + 1] = Math.random() * 4.5;
-      positions[i * 3 + 2] = (Math.random() - 0.5) * 12;
+      // Distribute particles in 3D volume around the player's viewing cone
+      const x = (Math.random() - 0.5) * 8.5;
+      const y = 0.2 + Math.random() * 3.8;
+      const z = -7.0 + Math.random() * 8.0;
+
+      positions[i * 3] = x;
+      positions[i * 3 + 1] = y;
+      positions[i * 3 + 2] = z;
+
+      this.dustBasePositions[i * 3] = x;
+      this.dustBasePositions[i * 3 + 1] = y;
+      this.dustBasePositions[i * 3 + 2] = z;
+
+      // Float speed and individual phase
+      this.dustSpeeds[i * 3] = (Math.random() - 0.5) * 0.05; // slight horizontal drift
+      this.dustSpeeds[i * 3 + 1] = 0.03 + Math.random() * 0.06; // vertical drift
+      this.dustSpeeds[i * 3 + 2] = Math.random() * Math.PI * 2; // phase offset
     }
+
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
+    const dustTex = this.createDustTexture();
     const material = new THREE.PointsMaterial({
-      color: 0xffffff,
-      size: 0.025,
+      color: 0xfffaea,
+      size: 0.075,
+      map: dustTex,
       transparent: true,
-      opacity: 0.25,
+      opacity: 0.55,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      sizeAttenuation: true,
     });
 
     return new THREE.Points(geometry, material);
@@ -763,20 +864,56 @@ export class RoomScene {
 
   // --- TICK / RENDER LOOP ---
   public update(dt: number, lookingAtConsole: boolean, cameraPitch: number) {
-    // 1. Update console canvas texture
+    // 1. Update console canvas texture & retro static screen shader
     this.screenTexture.needsUpdate = true;
+    if (this.consoleScreenMaterial?.uniforms) {
+      this.consoleScreenMaterial.uniforms.time.value += dt;
+      this.consoleScreenMaterial.uniforms.staticMix.value = THREE.MathUtils.damp(
+        this.consoleScreenMaterial.uniforms.staticMix.value,
+        lookingAtConsole ? 1.0 : 0.0,
+        10,
+        dt
+      );
+    }
 
     // 2. Update flashlight beam direction to match camera view
     this.camera.getWorldDirection(this._camDir);
     this.flashlight.position.copy(this.camera.position);
     this.flashlightTarget.position.copy(this.camera.position).addScaledVector(this._camDir, 8);
 
-    // 3. Flashlight intensity: off when looking at console, strong focused beam when inspecting room
-    const targetFlashlightIntensity = lookingAtConsole ? 0.0 : 8.5;
+    // 3. Detect if player is aiming the flashlight directly at an active Cuco (within ~24 degrees)
+    let cucoSpotted = false;
+    if (!lookingAtConsole) {
+      for (const inst of this.cucoPool) {
+        if (!inst.inUse) continue;
+        this._toCucoVec.subVectors(inst.group.position, this.camera.position).normalize();
+        const dot = this._camDir.dot(this._toCucoVec);
+        if (dot > 0.91) {
+          cucoSpotted = true;
+          break;
+        }
+      }
+    }
+    this.isCucoInFlashlightBeam = cucoSpotted;
+
+    // 4. Flashlight intensity & flickering:
+    // Off when looking at console
+    // When aiming at Cuco: FLICKERS RAPIDLY to alert player that Cuco has been illuminated!
+    let targetFlashlightIntensity = 0.0;
+    if (!lookingAtConsole) {
+      if (cucoSpotted) {
+        const now = performance.now();
+        const flickerPattern = Math.sin(now * 0.04) > -0.15 ? (Math.random() > 0.3 ? 9.8 : 2.5) : 0.4;
+        targetFlashlightIntensity = flickerPattern;
+      } else {
+        targetFlashlightIntensity = 8.5;
+      }
+    }
+
     this.flashlight.intensity = THREE.MathUtils.damp(
       this.flashlight.intensity,
       targetFlashlightIntensity,
-      12,
+      cucoSpotted ? 32 : 12,
       dt
     );
 
@@ -830,13 +967,63 @@ export class RoomScene {
     const newScale = THREE.MathUtils.damp(currentScale, targetConsoleScale, 8, dt);
     this.consoleMeshGroup.scale.set(newScale, newScale, newScale);
 
-    // 5. Subtle floating dust motion
-    const positions = this.dustParticles.geometry.attributes.position.array as Float32Array;
-    for (let i = 1; i < positions.length; i += 3) {
-      positions[i] -= dt * 0.05;
-      if (positions[i] < 0) positions[i] = 4.2;
+    // 5. Floating dust motes reacting to camera rotation for enhanced depth perception
+    if (this.dustParticles && this.dustBasePositions.length > 0) {
+      const posAttr = this.dustParticles.geometry.attributes.position;
+      const posArray = posAttr.array as Float32Array;
+      const time = performance.now() * 0.001;
+
+      // React to camera orientation:
+      // When camera turns yaw & pitch, the dust volume shifts with parallax counter-lag,
+      // creating noticeable multi-plane depth separation against the static room backdrop
+      const currentYaw = this.camera.rotation.y;
+      const currentPitch = this.camera.rotation.x;
+
+      this.dustParticles.rotation.y = THREE.MathUtils.damp(
+        this.dustParticles.rotation.y,
+        currentYaw * 0.18,
+        8,
+        dt
+      );
+      this.dustParticles.rotation.x = THREE.MathUtils.damp(
+        this.dustParticles.rotation.x,
+        currentPitch * 0.18,
+        8,
+        dt
+      );
+      this.dustParticles.position.x = THREE.MathUtils.damp(
+        this.dustParticles.position.x,
+        -currentYaw * 0.35,
+        8,
+        dt
+      );
+      this.dustParticles.position.y = THREE.MathUtils.damp(
+        this.dustParticles.position.y,
+        -currentPitch * 0.35,
+        8,
+        dt
+      );
+
+      for (let i = 0; i < posArray.length; i += 3) {
+        const phase = this.dustSpeeds[i + 2];
+        // Vertical gentle floating
+        posArray[i + 1] -= this.dustSpeeds[i + 1] * dt;
+        if (posArray[i + 1] < 0.2) {
+          posArray[i + 1] = 3.8;
+        }
+
+        // Horizontal sinusoidal sway
+        posArray[i] = this.dustBasePositions[i] + Math.sin(time * 0.8 + phase) * 0.15;
+        posArray[i + 2] = this.dustBasePositions[i + 2] + Math.cos(time * 0.7 + phase) * 0.15;
+      }
+      posAttr.needsUpdate = true;
+
+      // Scale dust opacity: when looking at console, reduce brightness to stay focused on screen;
+      // when looking at room, dust motes shimmer in the dark room/flashlight
+      const mat = this.dustParticles.material as THREE.PointsMaterial;
+      const targetOpacity = lookingAtConsole ? 0.25 : 0.60;
+      mat.opacity = THREE.MathUtils.damp(mat.opacity, targetOpacity, 8, dt);
     }
-    this.dustParticles.geometry.attributes.position.needsUpdate = true;
 
     // 6. Render scene
     this.renderer.render(this.scene, this.camera);
