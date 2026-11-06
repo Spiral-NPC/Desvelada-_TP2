@@ -4,19 +4,21 @@
  */
 
 import React from 'react';
-import { Skull, Moon, RotateCcw, Award, Clock, ShieldCheck, Trophy, Infinity as InfinityIcon } from 'lucide-react';
+import { Skull, Moon, RotateCcw, Home, Award, Clock, ShieldCheck, Trophy, Infinity as InfinityIcon } from 'lucide-react';
 import { GameStats } from '../types';
 
 interface GameOverModalProps {
   reason: 'jumpscare' | 'slept';
   stats: GameStats;
   onRestart: () => void;
+  onMainMenu?: () => void;
 }
 
 export const GameOverModal: React.FC<GameOverModalProps> = ({
   reason,
   stats,
   onRestart,
+  onMainMenu,
 }) => {
   const isJumpscare = reason === 'jumpscare';
   const isInfinite = stats.mode === 'infinite';
@@ -131,14 +133,26 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
           </div>
         </div>
 
-        {/* Action Button */}
-        <button
-          onClick={onRestart}
-          className="w-full flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-red-600 to-pink-600 py-3.5 font-pixel text-xs font-bold text-white shadow-xl hover:opacity-95 active:scale-95 transition"
-        >
-          <RotateCcw className="h-4 w-4" />
-          <span>REINTENTAR DESVELADA</span>
-        </button>
+        {/* Action Buttons */}
+        <div className="flex flex-col gap-2 pt-1">
+          <button
+            onClick={onRestart}
+            className="w-full flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-red-600 to-pink-600 py-3 font-pixel text-xs font-bold text-white shadow-xl hover:opacity-95 active:scale-95 transition"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            <span>REINTENTAR DESVELADA</span>
+          </button>
+
+          {onMainMenu && (
+            <button
+              onClick={onMainMenu}
+              className="w-full flex items-center justify-center gap-2 rounded-2xl bg-slate-900 hover:bg-slate-800 py-2.5 font-pixel text-[11px] text-slate-300 border border-slate-700 active:scale-95 transition"
+            >
+              <Home className="h-3.5 w-3.5 text-slate-400" />
+              <span>VOLVER AL INICIO</span>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

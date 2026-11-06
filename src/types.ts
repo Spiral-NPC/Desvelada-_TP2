@@ -7,8 +7,6 @@ export type MiniGameType = 'space';
 export type SensorStatus = {
   gyroscopeAllowed: boolean;
   gyroscopeActive: boolean;
-  cameraAllowed: boolean;
-  cameraActive: boolean;
   hapticsSupported: boolean;
 };
 
@@ -19,14 +17,23 @@ export interface OrientationData {
 }
 
 export type MonsterLocation =
+  | 'wardrobe'
+  | 'flowerchest'
+  | 'trainshelf'
+  | 'ventriloquist'
+  | 'beanbag'
+  | 'arttable'
+  | 'eyeballmobile'
+  | 'shuttercloset'
+  | 'toychair'
+  | 'footbed'
+  | 'underbed'
+  | 'ceiling'
   | 'closet'
   | 'door'
   | 'window'
-  | 'footbed'
   | 'desk'
-  | 'underbed'
   | 'curtain'
-  | 'ceiling'
   | 'bookshelf'
   | 'hallway';
 

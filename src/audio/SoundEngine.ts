@@ -137,6 +137,55 @@ class SoundEngine {
   }
 
   // --- CUCO MONSTER SOUNDS ---
+  // Subtle faint warning cue when the Cuco enters the room
+  public playCucoSpawnWarning() {
+    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    const now = this.ctx.currentTime;
+
+    // Faint eerie drone
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(58, now);
+    osc.frequency.exponentialRampToValueAtTime(36, now + 1.2);
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(140, now);
+
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.12, now + 0.25);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 1.3);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+
+    osc.start(now);
+    osc.stop(now + 1.4);
+
+    // Faint metallic wood creak / ghost chime
+    const chime = this.ctx.createOscillator();
+    const chimeGain = this.ctx.createGain();
+    chime.type = 'sine';
+    chime.frequency.setValueAtTime(370, now);
+    chime.frequency.exponentialRampToValueAtTime(260, now + 0.9);
+
+    chimeGain.gain.setValueAtTime(0.001, now);
+    chimeGain.gain.linearRampToValueAtTime(0.06, now + 0.15);
+    chimeGain.gain.exponentialRampToValueAtTime(0.001, now + 1.1);
+
+    chime.connect(chimeGain);
+    chimeGain.connect(this.masterGain);
+
+    chime.start(now + 0.05);
+    chime.stop(now + 1.15);
+
+    // Subtle gentle haptic pulse
+    this.triggerHaptic(25);
+  }
+
   public playMonsterStalk() {
     if (!this.ctx || !this.masterGain || this.isMuted) return;
     const now = this.ctx.currentTime;

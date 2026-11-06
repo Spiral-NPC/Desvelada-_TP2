@@ -4,15 +4,16 @@
 
 import React, { useEffect } from 'react';
 import confetti from 'canvas-confetti';
-import { Sun, Award, ShieldCheck, RotateCcw, Sparkles } from 'lucide-react';
+import { Sun, Award, ShieldCheck, RotateCcw, Home } from 'lucide-react';
 import { GameStats } from '../types';
 
 interface VictoryModalProps {
   stats: GameStats;
   onRestart: () => void;
+  onMainMenu?: () => void;
 }
 
-export const VictoryModal: React.FC<VictoryModalProps> = ({ stats, onRestart }) => {
+export const VictoryModal: React.FC<VictoryModalProps> = ({ stats, onRestart, onMainMenu }) => {
   useEffect(() => {
     confetti({
       particleCount: 120,
@@ -62,13 +63,25 @@ export const VictoryModal: React.FC<VictoryModalProps> = ({ stats, onRestart }) 
           </div>
         </div>
 
-        <button
-          onClick={onRestart}
-          className="w-full flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-amber-500 to-pink-600 py-3.5 font-pixel text-xs font-bold text-white shadow-xl hover:opacity-95 active:scale-95 transition"
-        >
-          <RotateCcw className="h-4 w-4" />
-          <span>JUGAR OTRA NOCHE</span>
-        </button>
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={onRestart}
+            className="w-full flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-amber-500 to-pink-600 py-3 font-pixel text-xs font-bold text-white shadow-xl hover:opacity-95 active:scale-95 transition"
+          >
+            <RotateCcw className="h-4 w-4" />
+            <span>JUGAR OTRA NOCHE</span>
+          </button>
+
+          {onMainMenu && (
+            <button
+              onClick={onMainMenu}
+              className="w-full flex items-center justify-center gap-2 rounded-2xl bg-slate-900 hover:bg-slate-800 py-2.5 font-pixel text-[11px] text-slate-300 border border-slate-700 active:scale-95 transition"
+            >
+              <Home className="h-3.5 w-3.5 text-slate-400" />
+              <span>VOLVER AL INICIO</span>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

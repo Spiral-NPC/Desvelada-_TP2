@@ -1,7 +1,6 @@
 /**
  * Mobile / Tablet Orientation Prompt Component for Desvelada.
- * Displays an intuitive prompt when the device is held vertically in portrait mode,
- * guiding the player to turn their phone/tablet horizontally for optimal two-thumb gameplay.
+ * Strictly enforces landscape orientation on mobile and tablets.
  */
 
 import React, { useEffect, useState } from 'react';
@@ -9,7 +8,6 @@ import { Smartphone, RotateCw } from 'lucide-react';
 
 export const RotatePrompt: React.FC = () => {
   const [isPortrait, setIsPortrait] = useState<boolean>(false);
-  const [dismissed, setDismissed] = useState<boolean>(false);
 
   useEffect(() => {
     const checkOrientation = () => {
@@ -34,7 +32,7 @@ export const RotatePrompt: React.FC = () => {
     };
   }, []);
 
-  if (!isPortrait || dismissed) return null;
+  if (!isPortrait) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-6 backdrop-blur-md select-none text-slate-100 animate-in fade-in duration-300">
@@ -44,7 +42,7 @@ export const RotatePrompt: React.FC = () => {
 
         {/* Animated Phone Icon */}
         <div className="relative mb-6 flex h-24 w-24 items-center justify-center rounded-3xl bg-slate-900 border border-slate-700 shadow-2xl">
-          <Smartphone className="h-12 w-12 text-pink-400 animate-pulse transition-transform duration-700 transform rotate-0 hover:rotate-90" />
+          <Smartphone className="h-12 w-12 text-pink-400 animate-pulse" />
           <RotateCw className="absolute -bottom-2 -right-2 h-7 w-7 text-indigo-400 animate-spin" style={{ animationDuration: '4s' }} />
         </div>
 
@@ -52,19 +50,16 @@ export const RotatePrompt: React.FC = () => {
           GIRA TU DISPOSITIVO
         </h3>
         <p className="mt-1 font-retro text-2xl text-slate-300">
-          MODO HORIZONTAL REQUERIDO
+          MODO HORIZONTAL OBLIGATORIO
         </p>
 
         <p className="mt-3 text-xs leading-relaxed text-slate-400 font-sans-modern">
-          Para jugar con la consola en tus manos, registrar la habitación con comodidad y tener la cruceta y botones en ambos pulgares, coloca tu dispositivo en horizontal.
+          Para jugar con la consola en tus manos, explorar la gran habitación y tener los controles ergonómicos en tus pulgares, coloca tu teléfono o tablet en horizontal.
         </p>
 
-        <button
-          onClick={() => setDismissed(true)}
-          className="mt-6 text-[11px] text-slate-500 hover:text-slate-300 underline font-sans-modern transition"
-        >
-          Continuar en vertical de todos modos
-        </button>
+        <div className="mt-5 rounded-full bg-pink-950/60 px-4 py-1.5 border border-pink-700/50 text-[10px] font-pixel text-pink-300">
+          GIRA LA PANTALLA PARA CONTINUAR
+        </div>
       </div>
     </div>
   );

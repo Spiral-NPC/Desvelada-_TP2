@@ -8,7 +8,6 @@
 import React from 'react';
 import {
   Compass,
-  Camera,
   Volume2,
   VolumeX,
   Eye,
@@ -34,7 +33,6 @@ interface HUDProps {
   onToggleLook: () => void;
   sensorStatus: SensorStatus;
   onToggleGyro: () => void;
-  onToggleCamera: () => void;
   isMuted: boolean;
   onToggleMute: () => void;
 }
@@ -51,7 +49,6 @@ export const HUD: React.FC<HUDProps> = ({
   onToggleLook,
   sensorStatus,
   onToggleGyro,
-  onToggleCamera,
   isMuted,
   onToggleMute,
 }) => {
@@ -104,18 +101,6 @@ export const HUD: React.FC<HUDProps> = ({
             </button>
 
             <button
-              onClick={onToggleCamera}
-              title={sensorStatus.cameraActive ? 'Modo AR' : 'Activar AR'}
-              className={`rounded-lg p-1.5 transition ${
-                sensorStatus.cameraActive
-                  ? 'bg-indigo-950/80 text-indigo-300 border border-indigo-700/60'
-                  : 'bg-slate-900 text-slate-400 hover:text-white'
-              }`}
-            >
-              <Camera className="h-3.5 w-3.5" />
-            </button>
-
-            <button
               onClick={onToggleMute}
               className="rounded-lg bg-slate-900 p-1.5 text-slate-300 hover:text-white transition"
             >
@@ -124,33 +109,38 @@ export const HUD: React.FC<HUDProps> = ({
           </div>
         </div>
 
-        {/* TOP CENTER: "MANTÉN: FINGIR DORMIR" BUTTON */}
-        <div className="pointer-events-auto flex flex-col items-center w-full max-w-xs">
+        {/* TOP CENTER: "HACERSE EL DORMIDO" BUTTON (ENLARGED & PROMINENT) */}
+        <div className="pointer-events-auto flex flex-col items-center w-full max-w-sm px-2">
           <button
             onPointerDown={onSleepStart}
             onPointerUp={onSleepEnd}
             onPointerLeave={onSleepEnd}
-            className={`w-full flex items-center justify-center gap-2 rounded-xl px-3 py-1.5 shadow-xl transition active:scale-95 ${
+            className={`w-full flex items-center justify-center gap-3 rounded-2xl py-3 px-4 shadow-2xl transition-all active:scale-95 select-none ${
               isSleeping
-                ? 'bg-indigo-600 text-white border-2 border-indigo-300 scale-95 shadow-indigo-500/50'
-                : 'bg-indigo-950/95 hover:bg-indigo-900 text-indigo-100 border border-indigo-500/70 shadow-lg'
+                ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white border-2 border-indigo-300 scale-95 shadow-indigo-500/50 ring-4 ring-indigo-500/30'
+                : 'bg-gradient-to-r from-indigo-950/95 to-slate-950/95 hover:from-indigo-900 hover:to-slate-900 text-indigo-100 border-2 border-indigo-500/80 shadow-indigo-950/50'
             }`}
           >
             {isSleeping ? (
               <>
-                <EyeOff className="h-3.5 w-3.5 text-indigo-200" />
-                <span className="font-pixel text-[10px] tracking-wider text-indigo-100">
-                  DURMIENDO... (SOLTAR)
-                </span>
+                <EyeOff className="h-6 w-6 text-indigo-200 animate-pulse" />
+                <div className="flex flex-col items-start leading-tight">
+                  <span className="font-pixel text-xs sm:text-sm tracking-wider text-white">
+                    ¡DURMIENDO! (SOLTAR PARA VER)
+                  </span>
+                  <span className="text-[10px] text-indigo-200 font-sans-modern">
+                    Ojos cerrados · El Cuco no te ve
+                  </span>
+                </div>
               </>
             ) : (
               <>
-                <Moon className="h-3.5 w-3.5 text-indigo-300" />
-                <div className="flex flex-col items-center leading-none">
-                  <span className="font-pixel text-[9px] tracking-wider text-white">
-                    MANTÉN: FINGIR DORMIR
+                <Eye className="h-6 w-6 text-indigo-300" />
+                <div className="flex flex-col items-start leading-tight">
+                  <span className="font-pixel text-xs sm:text-sm tracking-wider text-white">
+                    MANTÉN: HACERSE EL DORMIDO
                   </span>
-                  <span className="text-[7.5px] text-indigo-300/80 font-sans-modern mt-0.5">
+                  <span className="text-[10px] text-indigo-300/90 font-sans-modern">
                     Tapa tus ojos con la frazada
                   </span>
                 </div>
@@ -158,31 +148,41 @@ export const HUD: React.FC<HUDProps> = ({
             )}
           </button>
 
-          {/* Sleep / Boredom Meter right under sleep button */}
-          <div className="mt-1 w-full rounded-lg bg-slate-950/90 px-2.5 py-1 shadow-md border border-slate-800">
-            <div className="flex items-center justify-between text-[8px] uppercase font-sans-modern font-semibold">
-              <span className="flex items-center gap-1 text-slate-300">
-                <Moon className="h-2 w-2 text-indigo-400" />
-                Sueño (10s sin jugar):
+          {/* Intuitive Sleep Progress Bar without mentioning seconds */}
+          <div className="mt-1.5 w-full rounded-xl bg-slate-950/90 p-2 shadow-lg border border-slate-800/90">
+            <div className="flex items-center justify-between text-[9px] uppercase font-sans-modern font-bold tracking-wide">
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <Moon className={`h-3 w-3 ${isHighBoredom ? 'text-amber-400' : 'text-indigo-400'}`} />
+                <span>Nivel de Sueño:</span>
               </span>
               <span
-                className={`font-pixel text-[8px] ${
-                  isHighBoredom ? 'text-red-400 animate-pulse' : 'text-cyan-400'
+                className={`font-pixel text-[9px] flex items-center gap-1 ${
+                  isHighBoredom ? 'text-red-400 animate-pulse' : boredom > 35 ? 'text-amber-400' : 'text-cyan-400'
                 }`}
               >
-                {Math.round(boredom)}%
+                {isHighBoredom ? '¡QUEDÁNDOTE DORMIDO!' : boredom > 35 ? 'SOMNOLIENTO' : 'DESPIERTO'}
+                <span className="text-[8px] font-mono text-slate-400">({Math.round(boredom)}%)</span>
               </span>
             </div>
-            {/* Rapid progress bar */}
-            <div className="mt-0.5 h-1 w-full overflow-hidden rounded-full bg-slate-800">
+
+            {/* Smooth intuitive segmented progress bar */}
+            <div className="mt-1 relative h-2.5 w-full overflow-hidden rounded-full bg-slate-900 border border-slate-800">
               <div
-                className={`h-full transition-all duration-150 ${
+                className={`h-full transition-all duration-150 rounded-full ${
                   isHighBoredom
-                    ? 'bg-gradient-to-r from-amber-500 to-red-500'
-                    : 'bg-gradient-to-r from-cyan-500 to-indigo-500'
+                    ? 'bg-gradient-to-r from-amber-500 via-orange-500 to-red-500 shadow-[0_0_12px_rgba(239,68,68,0.8)]'
+                    : boredom > 35
+                    ? 'bg-gradient-to-r from-cyan-500 via-indigo-500 to-amber-500'
+                    : 'bg-gradient-to-r from-cyan-400 to-indigo-500'
                 }`}
                 style={{ width: `${Math.min(100, Math.max(0, boredom))}%` }}
               />
+              {/* Subtle visual tick lines for intuitive gauge feel */}
+              <div className="absolute inset-0 flex justify-between px-2 pointer-events-none opacity-20">
+                <div className="w-px h-full bg-white" />
+                <div className="w-px h-full bg-white" />
+                <div className="w-px h-full bg-white" />
+              </div>
             </div>
           </div>
         </div>

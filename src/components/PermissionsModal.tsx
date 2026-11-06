@@ -7,7 +7,6 @@
 import React, { useState } from 'react';
 import {
   Compass,
-  Camera,
   Moon,
   Clock,
   Infinity as InfinityIcon,
@@ -16,11 +15,12 @@ import {
   Eye,
   AlertTriangle,
   Play,
+  Smartphone,
 } from 'lucide-react';
 import { SensorStatus, GameMode } from '../types';
 
 interface PermissionsModalProps {
-  onStartGame: (options: { enableGyro: boolean; enableCamera: boolean; mode: GameMode }) => void;
+  onStartGame: (options: { enableGyro: boolean; mode: GameMode }) => void;
   sensorStatus: SensorStatus;
 }
 
@@ -29,7 +29,6 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({
 }) => {
   const [selectedMode, setSelectedMode] = useState<GameMode>('classic');
   const [requestGyro, setRequestGyro] = useState(true);
-  const [requestCamera, setRequestCamera] = useState(false);
   const [step, setStep] = useState<'welcome' | 'instructions'>('welcome');
 
   const handleStart = async () => {
@@ -41,9 +40,14 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({
       }
     }
 
+    try {
+      if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+    } catch {}
+
     onStartGame({
       enableGyro: requestGyro,
-      enableCamera: requestCamera,
       mode: selectedMode,
     });
   };
@@ -152,29 +156,21 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({
                   className="h-4 w-4 rounded accent-emerald-500 cursor-pointer"
                 />
               </label>
+            </div>
 
-              {/* Camera AR toggle */}
-              <label className="flex items-center justify-between rounded-xl border border-slate-800/80 bg-slate-900/40 p-2.5 cursor-pointer hover:bg-slate-900/70 transition">
-                <div className="flex items-center gap-2.5">
-                  <div className="rounded-lg bg-indigo-950/60 p-1.5 text-indigo-400 border border-indigo-800/40">
-                    <Camera className="h-3.5 w-3.5" />
-                  </div>
-                  <div>
-                    <div className="text-xs font-semibold text-white font-sans-modern">
-                      Modo Realidad Aumentada (Cámara)
-                    </div>
-                    <div className="text-[10px] text-slate-400">
-                      Usa tu cámara real como fondo de la habitación
-                    </div>
-                  </div>
+            {/* Mandatory Landscape Warning Banner for Mobile & Tablets */}
+            <div className="flex items-center gap-2.5 rounded-2xl bg-amber-950/60 border border-amber-500/50 p-2.5 text-left font-sans-modern">
+              <div className="rounded-xl bg-amber-500/20 p-2 text-amber-400 shrink-0">
+                <Smartphone className="h-4 w-4 rotate-90" />
+              </div>
+              <div>
+                <div className="text-[11px] font-bold text-amber-300">
+                  📱 Aviso obligatorio en móviles y tablets:
                 </div>
-                <input
-                  type="checkbox"
-                  checked={requestCamera}
-                  onChange={(e) => setRequestCamera(e.target.checked)}
-                  className="h-4 w-4 rounded accent-indigo-500 cursor-pointer"
-                />
-              </label>
+                <div className="text-[10px] text-slate-300 leading-tight">
+                  Se juega exclusivamente en <strong>Modo Horizontal</strong>. Gira tu dispositivo antes de comenzar.
+                </div>
+              </div>
             </div>
 
             {/* Navigation Buttons */}

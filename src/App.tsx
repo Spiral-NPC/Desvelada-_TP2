@@ -15,10 +15,10 @@ import { PermissionsModal } from './components/PermissionsModal';
 import { GameOverModal } from './components/GameOverModal';
 import { VictoryModal } from './components/VictoryModal';
 import { RotatePrompt } from './components/RotatePrompt';
+import { EyelidsOverlay } from './components/EyelidsOverlay';
 
 export default function App() {
   const mountRef = useRef<HTMLDivElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
 
   // Core engines
   const sceneRef = useRef<RoomScene | null>(null);
@@ -55,8 +55,6 @@ export default function App() {
   const [sensorStatus, setSensorStatus] = useState<SensorStatus>({
     gyroscopeAllowed: false,
     gyroscopeActive: false,
-    cameraAllowed: false,
-    cameraActive: false,
     hapticsSupported: typeof navigator !== 'undefined' && 'vibrate' in navigator,
   });
 
@@ -130,7 +128,6 @@ export default function App() {
   // --- SENSOR PERMISSIONS & START GAME ---
   const handleStartGame = async (options: {
     enableGyro: boolean;
-    enableCamera: boolean;
     mode: GameMode;
   }) => {
     soundEngine.init();
@@ -138,7 +135,7 @@ export default function App() {
     setStats((prev) => ({ ...prev, mode: options.mode }));
     setGameState('playing');
 
-    // 1. Gyroscope setup
+    // Gyroscope setup
     if (options.enableGyro && typeof window !== 'undefined') {
       try {
         const DeviceOrientationEventAny = window.DeviceOrientationEvent as unknown as {
@@ -155,24 +152,6 @@ export default function App() {
         }
       } catch (err) {
         console.warn('Gyroscope permission failed:', err);
-      }
-    }
-
-    // 2. Camera WebRTC setup (Modo AR)
-    if (options.enableCamera && navigator.mediaDevices?.getUserMedia) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' },
-        });
-        if (videoRef.current && sceneRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play();
-          sceneRef.current.setupARBackground(videoRef.current);
-          sceneRef.current.setARMode(true);
-          setSensorStatus((s) => ({ ...s, cameraAllowed: true, cameraActive: true }));
-        }
-      } catch (err) {
-        console.warn('Camera access denied:', err);
       }
     }
   };
@@ -206,37 +185,6 @@ export default function App() {
       setSensorStatus((s) => ({ ...s, gyroscopeActive: false }));
     } else {
       setupGyroscope();
-    }
-  };
-
-  // Toggle AR Camera
-  const toggleCamera = async () => {
-    const scene = sceneRef.current;
-    if (!scene) return;
-
-    if (sensorStatus.cameraActive) {
-      scene.setARMode(false);
-      setSensorStatus((s) => ({ ...s, cameraActive: false }));
-    } else {
-      if (videoRef.current && videoRef.current.srcObject) {
-        scene.setARMode(true);
-        setSensorStatus((s) => ({ ...s, cameraActive: true }));
-      } else if (navigator.mediaDevices?.getUserMedia) {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment' },
-          });
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-            videoRef.current.play();
-            scene.setupARBackground(videoRef.current);
-            scene.setARMode(true);
-            setSensorStatus((s) => ({ ...s, cameraAllowed: true, cameraActive: true }));
-          }
-        } catch {
-          // ignore
-        }
-      }
     }
   };
 
@@ -376,24 +324,52 @@ export default function App() {
     setGameState('playing');
   };
 
+  // Return to Initial Start Menu
+  const handleMainMenu = () => {
+    setBoredom(15);
+    setIsSleeping(false);
+    setLookingAtConsole(true);
+    targetPitch.current = -0.45;
+    targetYaw.current = 0;
+    monstersRef.current = [];
+    attackingMonsterId.current = null;
+    cucoSpawnCountdown.current = 3.5;
+    jumpscareTimer.current = 0;
+    setShowGameOver(false);
+    sceneRef.current?.hideAllCucos();
+    miniGameRef.current?.reset(false);
+    setGameState('intro');
+  };
+
   // --- MAIN RENDER & GAME LOOP (requestAnimationFrame) ---
   useEffect(() => {
     let animId = 0;
     let lastTime = performance.now();
     let clockTickTimer = 0;
 
-    const classicSpots: MonsterLocation[] = ['closet', 'door', 'window', 'footbed', 'desk'];
-    const infiniteSpots: MonsterLocation[] = [
-      'closet',
-      'door',
-      'window',
+    // Rich varied spawn spots in the large panoramic bedroom
+    const classicSpots: MonsterLocation[] = [
+      'wardrobe',
+      'flowerchest',
+      'trainshelf',
+      'beanbag',
+      'arttable',
+      'shuttercloset',
       'footbed',
-      'desk',
+    ];
+    const infiniteSpots: MonsterLocation[] = [
+      'wardrobe',
+      'flowerchest',
+      'trainshelf',
+      'ventriloquist',
+      'beanbag',
+      'arttable',
+      'eyeballmobile',
+      'shuttercloset',
+      'toychair',
+      'footbed',
       'underbed',
-      'curtain',
       'ceiling',
-      'bookshelf',
-      'hallway',
     ];
 
     const loop = (now: number) => {
@@ -456,10 +432,10 @@ export default function App() {
 
           // --- Boredom / Sleep Meter Logic ---
           // USER REQUIREMENT: Sleep meter takes 10 SECONDS without playing to reach 100%!
+          // When feigning sleep (eyes closed), it advances FASTER (~7.5s to 100%) without being exaggerated!
           if (isSleeping) {
-            // Feigning sleep: fills over ~18 seconds so player can trick the Cuco without falling asleep too fast
             setBoredom((prev) => {
-              const next = prev + (100 / 18.0) * dt;
+              const next = prev + (100 / 7.5) * dt;
               if (next >= 100) {
                 soundEngine.playSleepFall();
                 setGameState('slept');
@@ -515,6 +491,8 @@ export default function App() {
 
               monstersRef.current.push(monster);
               scene.spawnCuco(chosen, newId);
+              // Subtle faint warning cue when Cuco enters
+              soundEngine.playCucoSpawnWarning();
             }
 
             // USER REQUIREMENT: Frecuencia mucho más alta, aprox cada 5-10 segundos!
@@ -620,9 +598,6 @@ export default function App() {
       {/* Three.js Canvas Mount Container */}
       <div ref={mountRef} className="absolute inset-0 h-full w-full" />
 
-      {/* Hidden WebRTC video for AR mode */}
-      <video ref={videoRef} playsInline muted className="hidden" />
-
       {/* --- NARROW FLASHLIGHT VIGNETTE (Small focused radius in dark room) --- */}
       {!lookingAtConsole && !isSleeping && gameState === 'playing' && (
         <div
@@ -634,24 +609,8 @@ export default function App() {
         />
       )}
 
-      {/* --- BLANKET / FEIGN SLEEP COVER --- */}
-      <div
-        className={`pointer-events-none fixed inset-0 z-40 transition-opacity duration-300 ${
-          isSleeping ? 'opacity-95' : 'opacity-0'
-        } bg-slate-950 flex flex-col items-center justify-center`}
-      >
-        <div className="flex flex-col items-center gap-2 text-indigo-300">
-          <div className="font-pixel text-xl tracking-wider text-indigo-200">
-            FINGIENDO DORMIR...
-          </div>
-          <div className="text-xs font-retro text-2xl text-indigo-400">
-            Z z z . . .
-          </div>
-          <div className="text-[11px] text-slate-400 font-sans-modern mt-2">
-            No te muevas hasta que el Cuco se aleje
-          </div>
-        </div>
-      </div>
+      {/* --- ANIMATION OF EYELIDS CLOSING ("Hacerse el dormido") --- */}
+      <EyelidsOverlay isSleeping={isSleeping} />
 
       {/* --- HIGH BOREDOM / SLEEPY EYELID VIGNETTE --- */}
       {boredom > 60 && !isSleeping && gameState === 'playing' && (
@@ -681,7 +640,6 @@ export default function App() {
             onToggleLook={toggleLook}
             sensorStatus={sensorStatus}
             onToggleGyro={toggleGyroscope}
-            onToggleCamera={toggleCamera}
             isMuted={isMuted}
             onToggleMute={toggleMute}
           />
@@ -740,12 +698,17 @@ export default function App() {
           reason={gameState === 'jumpscare' ? 'jumpscare' : 'slept'}
           stats={stats}
           onRestart={handleRestart}
+          onMainMenu={handleMainMenu}
         />
       )}
 
       {/* --- VICTORY 6 AM SCREEN --- */}
       {gameState === 'victory' && (
-        <VictoryModal stats={stats} onRestart={handleRestart} />
+        <VictoryModal
+          stats={stats}
+          onRestart={handleRestart}
+          onMainMenu={handleMainMenu}
+        />
       )}
     </div>
   );

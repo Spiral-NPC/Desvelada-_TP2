@@ -55,10 +55,10 @@ export class MiniGameEngine {
   private height = 160;
   private frameCount = 0;
 
-  // Space Shooter State - Accelerated arcade pacing
+  // Space Shooter State - Balanced retro arcade pacing
   private space = {
     playerX: 120,
-    playerSpeed: 5.8,
+    playerSpeed: 4.2,
     bullets: [] as { x: number; y: number }[],
     alienBombs: [] as { x: number; y: number; vx?: number }[],
     aliens: [] as Alien[],
@@ -157,7 +157,7 @@ export class MiniGameEngine {
 
     // Determine layout variation based on level
     const variation = (this.level - 1) % 4; // 0, 1, 2, 3
-    const baseSpeed = 1.8 + (this.level - 1) * 0.35;
+    const baseSpeed = 0.85 + (this.level - 1) * 0.15;
 
     if (variation === 0) {
       // Variation 1: Classic Grid Formation
@@ -410,8 +410,8 @@ export class MiniGameEngine {
       return;
     }
 
-    // Dynamic speed boost multiplier when fewer aliens remain
-    const speedBoost = 1.0 + (1 - livingAliensCount / Math.max(1, this.space.totalWaveAliens)) * 1.1;
+    // Dynamic speed boost multiplier when fewer aliens remain (moderated for playable pacing)
+    const speedBoost = 1.0 + (1 - livingAliensCount / Math.max(1, this.space.totalWaveAliens)) * 0.45;
 
     for (const alien of this.space.aliens) {
       if (!alien.alive) continue;
@@ -421,9 +421,9 @@ export class MiniGameEngine {
       }
     }
 
-    // Bounce and step downwards
+    // Bounce and step downwards (smaller drop step so aliens descend gently)
     if (changeDir) {
-      const dropAmount = this.space.boss ? 2 : 5;
+      const dropAmount = this.space.boss ? 1.5 : 3;
       for (const alien of this.space.aliens) {
         alien.vx *= -1;
         alien.y += dropAmount;
@@ -436,18 +436,18 @@ export class MiniGameEngine {
       }
     }
 
-    // Alien bombs / Boss triple cannons
+    // Alien bombs / Boss triple cannons (relaxed interval)
     this.space.alienDropTimer += dt;
     const isBoss = !!this.space.boss?.alive;
-    const bombInterval = isBoss ? 0.7 : Math.max(0.4, 1.4 - this.level * 0.15);
+    const bombInterval = isBoss ? 1.0 : Math.max(0.7, 2.2 - this.level * 0.15);
 
     if (this.space.alienDropTimer > bombInterval) {
       this.space.alienDropTimer = 0;
       if (isBoss && this.space.boss) {
         // Boss fires 3 spread orbs!
-        this.space.alienBombs.push({ x: this.space.boss.x - 12, y: this.space.boss.y + 10, vx: -0.6 });
+        this.space.alienBombs.push({ x: this.space.boss.x - 12, y: this.space.boss.y + 10, vx: -0.5 });
         this.space.alienBombs.push({ x: this.space.boss.x, y: this.space.boss.y + 12, vx: 0 });
-        this.space.alienBombs.push({ x: this.space.boss.x + 12, y: this.space.boss.y + 10, vx: 0.6 });
+        this.space.alienBombs.push({ x: this.space.boss.x + 12, y: this.space.boss.y + 10, vx: 0.5 });
       } else {
         const aliveAliens = this.space.aliens.filter((a) => a.alive);
         if (aliveAliens.length > 0) {
@@ -457,10 +457,10 @@ export class MiniGameEngine {
       }
     }
 
-    // Update alien bombs
+    // Update alien bombs (gentler projectile speed)
     for (let i = this.space.alienBombs.length - 1; i >= 0; i--) {
       const bomb = this.space.alienBombs[i];
-      bomb.y += 3.8 + this.level * 0.3;
+      bomb.y += 2.2 + this.level * 0.15;
       if (bomb.vx) bomb.x += bomb.vx;
 
       if (bomb.y > this.height || bomb.x < 0 || bomb.x > this.width) {
