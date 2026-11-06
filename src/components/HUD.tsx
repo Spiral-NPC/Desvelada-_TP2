@@ -9,7 +9,6 @@ import React from 'react';
 import {
   Volume2,
   VolumeX,
-  Eye,
   EyeOff,
   Gamepad2,
   Moon,
@@ -32,7 +31,7 @@ interface HUDProps {
   isSleeping: boolean;
   onSleepStart: () => void;
   onSleepEnd: () => void;
-  onToggleLook: () => void;
+  onToggleLook?: () => void;
   sensorStatus: SensorStatus;
   isMuted: boolean;
   onToggleMute: () => void;
@@ -209,26 +208,6 @@ export const HUD: React.FC<HUDProps> = ({
             </div>
           </div>
         </div>
-      </div>
-
-      {/* --- BOTTOM ACTION BAR --- */}
-      <div className="pointer-events-auto flex justify-center pb-2">
-        <button
-          onClick={onToggleLook}
-          className="flex items-center gap-2 rounded-2xl bg-slate-900/90 px-4 py-2.5 text-xs font-sans-modern font-bold text-slate-200 shadow-xl border border-slate-700 hover:bg-slate-800 active:scale-95 transition"
-        >
-          {lookingAtConsole ? (
-            <>
-              <Eye className="h-4 w-4 text-cyan-400" />
-              <span>Mirar Habitación</span>
-            </>
-          ) : (
-            <>
-              <Gamepad2 className="h-4 w-4 text-pink-400" />
-              <span>Volver a Consola</span>
-            </>
-          )}
-        </button>
       </div>
     </div>
   );

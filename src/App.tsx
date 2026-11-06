@@ -262,7 +262,18 @@ export default function App() {
     lastTouchX.current = e.clientX;
     lastTouchY.current = e.clientY;
 
-    const sensitivity = 0.0035;
+    // Detect touch pointers or mobile/tablet devices
+    const isMobileOrTablet =
+      e.pointerType === 'touch' ||
+      e.pointerType === 'pen' ||
+      (typeof navigator !== 'undefined' &&
+        (navigator.maxTouchPoints > 0 ||
+          /Android|iPhone|iPad|iPod|Tablet|Silk|Mobile/i.test(navigator.userAgent)));
+
+    // USER REQUIREMENT: Aumentar un 30% la sensibilidad en dispositivos móviles y tablets
+    // Base sensitivity 0.0035 -> Mobile/tablet sensitivity 0.0035 * 1.30 = 0.00455
+    const sensitivity = isMobileOrTablet ? 0.00455 : 0.0035;
+
     // USER REQUIREMENT: Impedir al jugador ver los bordes o parte negra de la imagen
     // Clamped strictly to [-1.10, 1.10] radians (~ -63° to +63°) and pitch to [-0.55, 0.35]
     targetYaw.current = Math.max(-1.10, Math.min(1.10, targetYaw.current - deltaX * sensitivity));
