@@ -30,7 +30,6 @@ interface PermissionsModalProps {
 export const PermissionsModal: React.FC<PermissionsModalProps> = ({
   onStartGame,
   lossNotice,
-  lastStats,
 }) => {
   const [selectedMode, setSelectedMode] = useState<GameMode>('classic');
   const [step, setStep] = useState<'welcome' | 'instructions'>('welcome');
@@ -64,7 +63,7 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 backdrop-blur-md overflow-y-auto"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/92 p-4 overflow-y-auto"
       onPointerDown={triggerMenuMusic}
     >
       <div className="relative w-full max-w-md rounded-3xl bg-slate-950 p-6 text-slate-100 shadow-2xl border border-slate-800">
@@ -90,27 +89,15 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({
             {/* Defeat Banner (when returned to menu after losing) */}
             {lossNotice && (
               <div
-                className={`rounded-2xl p-3 text-left border shadow-lg animate-in fade-in ${
-                  lossNotice === 'cuco'
-                    ? 'bg-red-950/70 border-red-600/60 text-red-200'
-                    : 'bg-indigo-950/70 border-indigo-600/60 text-indigo-200'
-                }`}
+                data-testid="loss-banner"
+                className="rounded-2xl p-3.5 text-center border bg-red-950/70 border-red-600/60 text-red-200 shadow-lg"
               >
-                <div className="flex items-center gap-2 font-pixel text-xs text-white">
-                  {lossNotice === 'cuco' ? '💀 ¡EL CUCO TE ATRAPÓ!' : '🌙 ¡TE QUEDASTE DORMIDO!'}
+                <div className="font-pixel text-sm text-white tracking-wider">
+                  Perdiste
                 </div>
-                <div className="text-[10px] text-slate-300 font-sans-modern mt-1 leading-snug">
-                  {lossNotice === 'cuco'
-                    ? 'El monstruo te sorprendió. Has vuelto al menú principal y todos los estados del juego se han reiniciado.'
-                    : 'El medidor de sueño llegó al 100%. Has vuelto al menú principal y todos los estados del juego se han reiniciado.'}
+                <div className="text-xs text-red-200/90 font-sans-modern mt-1">
+                  Presta más atención la próxima
                 </div>
-                {lastStats && (
-                  <div className="mt-2 flex items-center justify-between text-[9px] font-pixel text-slate-400 bg-black/50 px-2 py-1 rounded-lg">
-                    <span>Puntuación: {lastStats.score} pts</span>
-                    <span>Hora: {lastStats.currentHour === 0 ? '12 AM' : `${lastStats.currentHour} AM`}</span>
-                    <span>Burlados: {lastStats.monstersRepelled}</span>
-                  </div>
-                )}
               </div>
             )}
 
@@ -214,6 +201,8 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({
                 ¿Cómo Jugar?
               </button>
               <button
+                type="button"
+                data-start="true"
                 onClick={handleStart}
                 className="flex-1 flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-pink-600 to-indigo-600 py-3 font-pixel text-xs font-bold text-white shadow-xl hover:opacity-90 active:scale-95 transition"
               >
@@ -269,6 +258,8 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({
                 Volver
               </button>
               <button
+                type="button"
+                data-start="true"
                 onClick={handleStart}
                 className="flex-1 flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-pink-600 to-indigo-600 py-3 font-pixel text-xs font-bold text-white shadow-xl hover:opacity-90 active:scale-95 transition"
               >

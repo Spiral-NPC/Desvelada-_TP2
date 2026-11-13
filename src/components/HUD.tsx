@@ -37,7 +37,7 @@ interface HUDProps {
   onToggleMute: () => void;
 }
 
-export const HUD: React.FC<HUDProps> = ({
+export const HUD: React.FC<HUDProps> = React.memo(({
   boredom,
   timeString,
   level,
@@ -211,4 +211,5 @@ export const HUD: React.FC<HUDProps> = ({
       </div>
     </div>
   );
-};
+});
+

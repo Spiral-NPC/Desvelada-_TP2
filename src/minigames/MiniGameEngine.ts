@@ -49,11 +49,25 @@ export class MiniGameEngine {
   public dpadUp: boolean = false;
   public dpadDown: boolean = false;
   public buttonA: boolean = false;
-  public buttonB: boolean = false;
+
+  public renderVersion: number = 0;
 
   private width = 240;
   private height = 160;
   private frameCount = 0;
+  private shipHullCanvas: HTMLCanvasElement;
+  private scanlineCanvas: HTMLCanvasElement;
+
+  private static readonly SHIP_PALETTE: Record<string, string> = {
+    R: '#f80840', // Crimson hull
+    Y: '#f8e830', // Yellow wingtips & thruster core
+    C: '#20a0f8', // Cyan cockpit visor
+    G: '#b8b8b8', // Silver grey metallic bands
+    B: '#984028', // Rust brown wing roots
+    P: '#706890', // Lavender-slate nose collar
+    N: '#182040', // Dark navy inner wing joints
+    S: '#504840', // Warm pixel drop-shadow
+  };
 
   // Space Shooter State - Balanced retro arcade pacing
   private space = {
@@ -73,8 +87,56 @@ export class MiniGameEngine {
     this.canvas.width = this.width;
     this.canvas.height = this.height;
     this.ctx = this.canvas.getContext('2d')!;
+    this.ctx.imageSmoothingEnabled = false;
+
+    this.shipHullCanvas = this.createShipHullSprite();
+    this.scanlineCanvas = this.createScanlineOverlay();
+
     this.reset(true);
     this.update(0.016);
+  }
+
+  private createShipHullSprite(): HTMLCanvasElement {
+    const hullRows = [
+      '.....RRS....',
+      '.....RRS....',
+      '.....RRS....',
+      '....RPPRS...',
+      '.Y..RCCRS.Y.',
+      '.G.RBCCBRSG.',
+      '.RNBBRRBBNR.',
+      'RRNRR..RRNRR',
+      '...RR..RRS..',
+      '...GG..GG...',
+      '...RY..YR...',
+    ];
+    const cell = 2;
+    const sprite = document.createElement('canvas');
+    sprite.width = 12 * cell;
+    sprite.height = hullRows.length * cell;
+    const sctx = sprite.getContext('2d')!;
+    for (let r = 0; r < hullRows.length; r++) {
+      const row = hullRows[r];
+      for (let c = 0; c < row.length; c++) {
+        const ch = row[c];
+        if (ch === '.') continue;
+        sctx.fillStyle = MiniGameEngine.SHIP_PALETTE[ch];
+        sctx.fillRect(c * cell, r * cell, cell, cell);
+      }
+    }
+    return sprite;
+  }
+
+  private createScanlineOverlay(): HTMLCanvasElement {
+    const overlay = document.createElement('canvas');
+    overlay.width = this.width;
+    overlay.height = this.height;
+    const octx = overlay.getContext('2d')!;
+    octx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+    for (let y = 0; y < this.height; y += 2) {
+      octx.fillRect(0, y, this.width, 1);
+    }
+    return overlay;
   }
 
   public setPaused(paused: boolean) {
@@ -291,9 +353,9 @@ export class MiniGameEngine {
 
     if (this.isPaused) return;
 
-    // Fire laser beam with rapid response
+    // Fire laser beam with rapid response from the nose cannon
     if (this.space.bullets.length < 5) {
-      this.space.bullets.push({ x: this.space.playerX, y: 135 });
+      this.space.bullets.push({ x: this.space.playerX, y: 129 });
       soundEngine.playRetroShoot();
       this.onActionSuccess?.();
     }
@@ -469,7 +531,7 @@ export class MiniGameEngine {
       }
 
       // Check hit with player
-      if (Math.abs(bomb.x - this.space.playerX) < 10 && Math.abs(bomb.y - 140) < 8) {
+      if (Math.abs(bomb.x - this.space.playerX) < 11 && Math.abs(bomb.y - 140) < 9) {
         this.isGameOver = true;
         soundEngine.playRetroExplosion();
         return;
@@ -539,21 +601,38 @@ export class MiniGameEngine {
       ctx.textAlign = 'left';
     }
 
-    // Player ship
-    const px = this.space.playerX;
-    ctx.fillStyle = '#38bdf8';
-    ctx.beginPath();
-    ctx.moveTo(px, 134);
-    ctx.lineTo(px - 10, 148);
-    ctx.lineTo(px, 144);
-    ctx.lineTo(px + 10, 148);
-    ctx.closePath();
-    ctx.fill();
+    // Player ship (cached pixel-art hull sprite + animated thruster sparks)
+    const px = Math.round(this.space.playerX);
+    const cell = 2;
+    const shipLeft = px - 6 * cell;
+    const shipTop = 129;
 
-    // Engine thruster glow
-    ctx.fillStyle = '#f97316';
-    const thruster = this.isPaused ? 3 : 3 + Math.sin(this.frameCount * 0.8) * 2;
-    ctx.fillRect(px - 2, 145, 4, thruster);
+    ctx.drawImage(this.shipHullCanvas, shipLeft, shipTop);
+
+    // Animated pixel exhaust sparks matching the sprite's red/yellow thruster particles
+    const sparkPhase = this.isPaused ? 0 : Math.floor(this.frameCount / 6) % 2;
+    const exhaustRows =
+      sparkPhase === 0
+        ? [
+            '..Y.R.Y..R..',
+            '...Y....R...',
+            '.....R......',
+          ]
+        : [
+            '...Y.R.Y.R..',
+            '..R..Y..Y...',
+            '....Y..R....',
+          ];
+
+    for (let r = 0; r < exhaustRows.length; r++) {
+      const row = exhaustRows[r];
+      for (let c = 0; c < row.length; c++) {
+        const ch = row[c];
+        if (ch === '.') continue;
+        ctx.fillStyle = MiniGameEngine.SHIP_PALETTE[ch];
+        ctx.fillRect(shipLeft + c * cell, shipTop + (12 + r) * cell, cell, cell);
+      }
+    }
 
     // Player bullets
     ctx.fillStyle = '#38bdf8';
@@ -622,11 +701,8 @@ export class MiniGameEngine {
       ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
     }
 
-    // Scanlines
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
-    for (let y = 0; y < this.height; y += 2) {
-      ctx.fillRect(0, y, this.width, 1);
-    }
+    // Cached Scanlines overlay (1 drawImage instead of 80 fillRects/frame)
+    ctx.drawImage(this.scanlineCanvas, 0, 0);
 
     // --- PAUSE OVERLAY ---
     if (this.isPaused && !this.isGameOver && !this.isLevelClear) {
@@ -683,5 +759,7 @@ export class MiniGameEngine {
       ctx.fillText('PULSA A / TAP', this.width / 2, 99);
       ctx.textAlign = 'left';
     }
+
+    this.renderVersion++;
   }
 }

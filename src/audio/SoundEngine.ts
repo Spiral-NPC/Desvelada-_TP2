@@ -214,6 +214,65 @@ class SoundEngine {
     this.triggerHaptic(25);
   }
 
+  /**
+   * Subtle, random wooden floorboard / closet creak in the dark bedroom
+   * triggered while the player is focused on the handheld console.
+   */
+  public playRoomCreak() {
+    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    const now = this.ctx.currentTime;
+    const duration = 0.45 + Math.random() * 0.45; // 0.45s - 0.90s subtle creak
+
+    // Resonant strained wood oscillator with slight pitch bend & wobble
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sawtooth';
+    const startFreq = 95 + Math.random() * 85;
+    const endFreq = startFreq * (0.72 + Math.random() * 0.45);
+    osc.frequency.setValueAtTime(startFreq, now);
+    osc.frequency.linearRampToValueAtTime(startFreq * 1.08, now + duration * 0.35);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(45, endFreq), now + duration);
+
+    // Subtle stick-slip LFO modulation for authentic wood grain creak texture
+    const lfo = this.ctx.createOscillator();
+    const lfoGain = this.ctx.createGain();
+    lfo.type = 'sine';
+    lfo.frequency.setValueAtTime(14 + Math.random() * 14, now);
+    lfoGain.gain.setValueAtTime(18, now);
+    lfo.connect(lfoGain);
+    lfoGain.connect(osc.frequency);
+
+    // Narrow wood-body bandpass filter
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(420 + Math.random() * 340, now);
+    filter.Q.setValueAtTime(5.5, now);
+
+    // Quiet, tense envelope (peaks very subtly)
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(0.045 + Math.random() * 0.025, now + duration * 0.25);
+    gain.gain.linearRampToValueAtTime(0.015, now + duration * 0.65);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    osc.connect(filter);
+    filter.connect(gain);
+
+    // Subtle random stereo placement (left or right corner of bedroom)
+    if (typeof this.ctx.createStereoPanner === 'function') {
+      const panner = this.ctx.createStereoPanner();
+      panner.pan.setValueAtTime((Math.random() - 0.5) * 1.4, now);
+      gain.connect(panner);
+      panner.connect(this.masterGain);
+    } else {
+      gain.connect(this.masterGain);
+    }
+
+    osc.start(now);
+    lfo.start(now);
+    osc.stop(now + duration + 0.05);
+    lfo.stop(now + duration + 0.05);
+  }
+
   public playMonsterStalk() {
     if (!this.ctx || !this.masterGain || this.isMuted) return;
     const now = this.ctx.currentTime;
@@ -555,7 +614,7 @@ class SoundEngine {
   }
 
   public stopAmbienteMusic() {
-    if (this.ambienteAudio) {
+    if (this.ambienteAudio && (!this.ambienteAudio.paused || this.ambienteAudio.currentTime !== 0)) {
       this.ambienteAudio.pause();
       this.ambienteAudio.currentTime = 0;
     }
@@ -572,7 +631,7 @@ class SoundEngine {
   }
 
   public stopConsolaMusic() {
-    if (this.consolaAudio) {
+    if (this.consolaAudio && (!this.consolaAudio.paused || this.consolaAudio.currentTime !== 0)) {
       this.consolaAudio.pause();
       this.consolaAudio.currentTime = 0;
     }
@@ -602,8 +661,10 @@ class SoundEngine {
   public stopGameOverMusic() {
     if (this.gameOverAudio) {
       this.gameOverAudio.onended = null;
-      this.gameOverAudio.pause();
-      this.gameOverAudio.currentTime = 0;
+      if (!this.gameOverAudio.paused || this.gameOverAudio.currentTime !== 0) {
+        this.gameOverAudio.pause();
+        this.gameOverAudio.currentTime = 0;
+      }
     }
   }
 

@@ -49,10 +49,11 @@ export class RoomScene {
   public lampLight: THREE.PointLight;
   public ambientNightLight: THREE.HemisphereLight;
 
-  private isSoftwareGl: boolean;
+  public readonly isSoftwareGl: boolean;
   private dustParticles: THREE.Points;
-  private dustSpeeds: Float32Array = new Float32Array(0);
-  private dustBasePositions: Float32Array = new Float32Array(0);
+  private dustMaterial!: THREE.ShaderMaterial;
+  private lastScreenRenderVersion: number = -1;
+  private elapsedTime: number = 0;
 
   // Cuco spawn anchor locations matching the panoramic reference image Bedroom.webp
   public static readonly LOCATIONS: Record<MonsterLocation, { pos: [number, number, number]; rotY: number }> = {
@@ -111,9 +112,9 @@ export class RoomScene {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
-    this.renderer.setPixelRatio(this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
-    this.renderer.shadowMap.enabled = !this.isSoftwareGl;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.setPixelRatio(this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio || 1, 1.5));
+    // Zero meshes cast shadows in this scene; disable empty shadow map pass for higher FPS
+    this.renderer.shadowMap.enabled = false;
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     container.appendChild(this.renderer.domElement);
 
@@ -134,12 +135,7 @@ export class RoomScene {
     // Flashlight (narrow, smaller focused beam radius: Math.PI / 8.8 ~20.4 deg)
     this.flashlight = new THREE.SpotLight(0xffedd5, 10.0, 22, Math.PI / 8.8, 0.22, 1.6);
     this.flashlight.position.copy(this.camera.position);
-    this.flashlight.castShadow = !this.isSoftwareGl;
-    if (!this.isSoftwareGl) {
-      this.flashlight.shadow.mapSize.width = 512;
-      this.flashlight.shadow.mapSize.height = 512;
-      this.flashlight.shadow.bias = -0.001;
-    }
+    this.flashlight.castShadow = false;
 
     this.flashlightTarget = new THREE.Object3D();
     this.scene.add(this.flashlightTarget);
@@ -326,7 +322,7 @@ export class RoomScene {
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.set(0, -0.05, 0);
-    floor.receiveShadow = !this.isSoftwareGl;
+    floor.receiveShadow = false;
     this.roomGroup.add(floor);
 
     // 3. Ceiling plane
@@ -702,49 +698,69 @@ export class RoomScene {
     return texture;
   }
 
-  // --- FLOATING MOONLIT DUST MOTES (REACTING TO CAMERA FOR DEPTH PERCEPTION) ---
+  // --- FLOATING MOONLIT DUST MOTES (GPU-ANIMATED FOR 60 FPS, CAMERA PARALLAX) ---
   private buildDustParticles(): THREE.Points {
     const count = 260;
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(count * 3);
-    this.dustBasePositions = new Float32Array(count * 3);
-    this.dustSpeeds = new Float32Array(count * 3);
+    const speeds = new Float32Array(count * 3);
 
     for (let i = 0; i < count; i++) {
       // Distribute particles in 3D volume around the player's viewing cone
-      const x = (Math.random() - 0.5) * 8.5;
-      const y = 0.2 + Math.random() * 3.8;
-      const z = -7.0 + Math.random() * 8.0;
-
-      positions[i * 3] = x;
-      positions[i * 3 + 1] = y;
-      positions[i * 3 + 2] = z;
-
-      this.dustBasePositions[i * 3] = x;
-      this.dustBasePositions[i * 3 + 1] = y;
-      this.dustBasePositions[i * 3 + 2] = z;
+      positions[i * 3] = (Math.random() - 0.5) * 8.5;
+      positions[i * 3 + 1] = 0.2 + Math.random() * 3.6;
+      positions[i * 3 + 2] = -7.0 + Math.random() * 8.0;
 
       // Float speed and individual phase
-      this.dustSpeeds[i * 3] = (Math.random() - 0.5) * 0.05; // slight horizontal drift
-      this.dustSpeeds[i * 3 + 1] = 0.03 + Math.random() * 0.06; // vertical drift
-      this.dustSpeeds[i * 3 + 2] = Math.random() * Math.PI * 2; // phase offset
+      speeds[i * 3] = (Math.random() - 0.5) * 0.05; // horizontal drift seed
+      speeds[i * 3 + 1] = 0.03 + Math.random() * 0.06; // vertical drift speed
+      speeds[i * 3 + 2] = Math.random() * Math.PI * 2; // phase offset
     }
 
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('aSpeed', new THREE.BufferAttribute(speeds, 3));
 
     const dustTex = this.createDustTexture();
-    const material = new THREE.PointsMaterial({
-      color: 0xfffaea,
-      size: 0.075,
-      map: dustTex,
+    const pixelRatio = this.renderer.getPixelRatio();
+    this.dustMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        tDust: { value: dustTex },
+        uTime: { value: 0.0 },
+        uOpacity: { value: 0.55 },
+        uPointScale: { value: 0.075 * window.innerHeight * 0.5 * pixelRatio },
+      },
+      vertexShader: `
+        attribute vec3 aSpeed;
+        uniform float uTime;
+        uniform float uPointScale;
+        void main() {
+          float phase = aSpeed.z;
+          float wrappedY = 0.2 + mod((position.y - 0.2) - aSpeed.y * uTime, 3.6);
+          vec3 animatedPos = vec3(
+            position.x + sin(uTime * 0.8 + phase) * 0.15,
+            wrappedY,
+            position.z + cos(uTime * 0.7 + phase) * 0.15
+          );
+          vec4 mvPosition = modelViewMatrix * vec4(animatedPos, 1.0);
+          gl_PointSize = max(1.0, uPointScale / max(0.2, -mvPosition.z));
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        uniform sampler2D tDust;
+        uniform float uOpacity;
+        void main() {
+          vec4 texColor = texture2D(tDust, gl_PointCoord);
+          if (texColor.a < 0.01) discard;
+          gl_FragColor = vec4(vec3(1.0, 0.98, 0.92) * texColor.rgb, texColor.a * uOpacity);
+        }
+      `,
       transparent: true,
-      opacity: 0.55,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
-      sizeAttenuation: true,
     });
 
-    return new THREE.Points(geometry, material);
+    return new THREE.Points(geometry, this.dustMaterial);
   }
 
   // --- UPDATE DIGITAL CLOCK TEXTURE ---
@@ -863,11 +879,24 @@ export class RoomScene {
   }
 
   // --- TICK / RENDER LOOP ---
-  public update(dt: number, lookingAtConsole: boolean, cameraPitch: number) {
-    // 1. Update console canvas texture & retro static screen shader
-    this.screenTexture.needsUpdate = true;
+  public update(
+    dt: number,
+    lookingAtConsole: boolean,
+    _cameraPitch: number,
+    screenRenderVersion?: number
+  ) {
+    this.elapsedTime += dt;
+
+    // 1. Upload console canvas texture ONLY when the minigame canvas was actually redrawn
+    if (screenRenderVersion === undefined || screenRenderVersion !== this.lastScreenRenderVersion) {
+      this.screenTexture.needsUpdate = true;
+      if (screenRenderVersion !== undefined) {
+        this.lastScreenRenderVersion = screenRenderVersion;
+      }
+    }
+
     if (this.consoleScreenMaterial?.uniforms) {
-      this.consoleScreenMaterial.uniforms.time.value += dt;
+      this.consoleScreenMaterial.uniforms.time.value = this.elapsedTime;
       this.consoleScreenMaterial.uniforms.staticMix.value = THREE.MathUtils.damp(
         this.consoleScreenMaterial.uniforms.staticMix.value,
         lookingAtConsole ? 1.0 : 0.0,
@@ -902,8 +931,8 @@ export class RoomScene {
     let targetFlashlightIntensity = 0.0;
     if (!lookingAtConsole) {
       if (cucoSpotted) {
-        const now = performance.now();
-        const flickerPattern = Math.sin(now * 0.04) > -0.15 ? (Math.random() > 0.3 ? 9.8 : 2.5) : 0.4;
+        const flickerPattern =
+          Math.sin(this.elapsedTime * 40.0) > -0.15 ? (Math.random() > 0.3 ? 9.8 : 2.5) : 0.4;
         targetFlashlightIntensity = flickerPattern;
       } else {
         targetFlashlightIntensity = 8.5;
@@ -916,13 +945,17 @@ export class RoomScene {
       cucoSpotted ? 32 : 12,
       dt
     );
+    // Skip inactive SpotLight & bedside PointLight shading passes when looking at the console
+    this.flashlight.visible = !lookingAtConsole || this.flashlight.intensity > 0.01;
+    this.lampLight.visible = !lookingAtConsole;
 
     // Hide room details completely when looking down at the console for total darkness isolation
     this.roomGroup.visible = !lookingAtConsole;
 
     // Cuco visibility: hidden when focused on console unless jumpscare is in progress
-    this.cucoPool.forEach((inst) => {
-      if (!inst.inUse) return;
+    const armAnimTime = this.elapsedTime * 3.0;
+    for (const inst of this.cucoPool) {
+      if (!inst.inUse) continue;
 
       if (lookingAtConsole) {
         const distToCam = inst.group.position.distanceTo(this.camera.position);
@@ -931,11 +964,10 @@ export class RoomScene {
         }
       } else {
         inst.group.visible = true;
-        const t = performance.now() * 0.003;
-        if (inst.leftArm) inst.leftArm.rotation.z = Math.sin(t + inst.originPos.x) * 0.1;
-        if (inst.rightArm) inst.rightArm.rotation.z = -Math.sin(t + inst.originPos.x) * 0.1;
+        if (inst.leftArm) inst.leftArm.rotation.z = Math.sin(armAnimTime + inst.originPos.x) * 0.1;
+        if (inst.rightArm) inst.rightArm.rotation.z = -Math.sin(armAnimTime + inst.originPos.x) * 0.1;
       }
-    });
+    }
 
     // 4. Animate handheld console position and scale
     const isLandscape = this.camera.aspect > 1.2;
@@ -967,15 +999,8 @@ export class RoomScene {
     const newScale = THREE.MathUtils.damp(currentScale, targetConsoleScale, 8, dt);
     this.consoleMeshGroup.scale.set(newScale, newScale, newScale);
 
-    // 5. Floating dust motes reacting to camera rotation for enhanced depth perception
-    if (this.dustParticles && this.dustBasePositions.length > 0) {
-      const posAttr = this.dustParticles.geometry.attributes.position;
-      const posArray = posAttr.array as Float32Array;
-      const time = performance.now() * 0.001;
-
-      // React to camera orientation:
-      // When camera turns yaw & pitch, the dust volume shifts with parallax counter-lag,
-      // creating noticeable multi-plane depth separation against the static room backdrop
+    // 5. Floating dust motes (GPU-animated motion + camera rotation parallax)
+    if (this.dustParticles && this.dustMaterial) {
       const currentYaw = this.camera.rotation.y;
       const currentPitch = this.camera.rotation.x;
 
@@ -1004,36 +1029,54 @@ export class RoomScene {
         dt
       );
 
-      for (let i = 0; i < posArray.length; i += 3) {
-        const phase = this.dustSpeeds[i + 2];
-        // Vertical gentle floating
-        posArray[i + 1] -= this.dustSpeeds[i + 1] * dt;
-        if (posArray[i + 1] < 0.2) {
-          posArray[i + 1] = 3.8;
-        }
-
-        // Horizontal sinusoidal sway
-        posArray[i] = this.dustBasePositions[i] + Math.sin(time * 0.8 + phase) * 0.15;
-        posArray[i + 2] = this.dustBasePositions[i + 2] + Math.cos(time * 0.7 + phase) * 0.15;
-      }
-      posAttr.needsUpdate = true;
-
-      // Scale dust opacity: when looking at console, reduce brightness to stay focused on screen;
-      // when looking at room, dust motes shimmer in the dark room/flashlight
-      const mat = this.dustParticles.material as THREE.PointsMaterial;
+      this.dustMaterial.uniforms.uTime.value = this.elapsedTime;
       const targetOpacity = lookingAtConsole ? 0.25 : 0.60;
-      mat.opacity = THREE.MathUtils.damp(mat.opacity, targetOpacity, 8, dt);
+      this.dustMaterial.uniforms.uOpacity.value = THREE.MathUtils.damp(
+        this.dustMaterial.uniforms.uOpacity.value,
+        targetOpacity,
+        8,
+        dt
+      );
     }
 
     // 6. Render scene
     this.renderer.render(this.scene, this.camera);
   }
 
+  /**
+   * Software-WebGL frame pacer (SwiftShader/llvmpipe) to prevent starving screenshots
+   * while yielding after GPU draw fences complete.
+   */
+  public afterDraw(cb: () => void): number {
+    const gl = this.renderer.getContext() as WebGL2RenderingContext;
+    if (!gl || typeof gl.fenceSync !== 'function') {
+      return window.setTimeout(cb, 80);
+    }
+    const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    gl.flush();
+    let timerId = 0;
+    const poll = () => {
+      const state = sync && gl.getSyncParameter(sync, gl.SYNC_STATUS);
+      if (state === gl.UNSIGNALED) {
+        timerId = window.setTimeout(poll, 5);
+      } else {
+        if (sync) gl.deleteSync(sync);
+        timerId = window.setTimeout(cb, 80);
+      }
+    };
+    timerId = window.setTimeout(poll, 5);
+    return timerId;
+  }
+
   public handleResize() {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
+    const pixelRatio = this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio || 1, 1.5);
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(pixelRatio);
+    if (this.dustMaterial?.uniforms?.uPointScale) {
+      this.dustMaterial.uniforms.uPointScale.value = 0.075 * window.innerHeight * 0.5 * pixelRatio;
+    }
   }
 
   public dispose() {
