@@ -21,6 +21,7 @@ import {
   isHudImminentDanger,
   computeCucoScreechVolume,
   pickNextCucoTrackIndex,
+  computeFoxyJumpscarePose,
 } from './gameLogic';
 
 test('Cuco spawn rate keeps steady 0.68x base without level acceleration', () => {
@@ -155,11 +156,32 @@ test('Boredom UI sync avoids per-frame churn while committing integer/threshold 
   assert.equal(shouldSyncBoredomUi(0.4, 0, 16), true);
 });
 
-test('First-time tutorial appears only on initial start and never on retries or subsequent plays', () => {
+test('Tutorial plays every time a new game starts regardless of prior plays', () => {
   assert.equal(shouldShowFirstTimeTutorial(null, false), true);
-  assert.equal(shouldShowFirstTimeTutorial('1', false), false);
-  assert.equal(shouldShowFirstTimeTutorial(null, true), false);
-  assert.equal(shouldShowFirstTimeTutorial('1', true), false);
+  assert.equal(shouldShowFirstTimeTutorial('1', false), true);
+  assert.equal(shouldShowFirstTimeTutorial(null, true), true);
+  assert.equal(shouldShowFirstTimeTutorial('1', true), true);
+});
+
+test('Foxy-style jumpscare pose surges forward, flares arms wide, and opens hinged jaw', () => {
+  const start = computeFoxyJumpscarePose(0);
+  assert.equal(start.leapT, 0);
+  assert.equal(start.jawRotX, 0);
+
+  const midLeap = computeFoxyJumpscarePose(0.2);
+  assert.ok(midLeap.leapT > 0.7);
+  assert.ok(midLeap.arcY > 0.3);
+  assert.ok(midLeap.leftArmRotX < -1.0);
+  assert.ok(midLeap.leftArmRotZ < -0.5);
+  assert.ok(midLeap.rightArmRotX < -0.9);
+  assert.ok(midLeap.rightArmRotZ > 0.5);
+  assert.ok(midLeap.jawRotX > 0.4);
+
+  const thrashA = computeFoxyJumpscarePose(0.55);
+  const thrashB = computeFoxyJumpscarePose(0.62);
+  assert.equal(thrashA.leapT, 1);
+  assert.notEqual(thrashA.headRollZ, thrashB.headRollZ);
+  assert.notEqual(thrashA.jawRotX, thrashB.jawRotX);
 });
 
 test('Classic mode wins upon clearing Level 15 Final Boss while infinite continues endlessly', () => {

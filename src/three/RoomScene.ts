@@ -12,7 +12,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { MiniGameEngine } from '../minigames/MiniGameEngine';
 import { MonsterLocation } from '../types';
-import { isFlashlightHittingCucoBody } from '../game/gameLogic';
+import { isFlashlightHittingCucoBody, computeFoxyJumpscarePose } from '../game/gameLogic';
 
 export interface CucoInstance {
   id: string;
@@ -20,12 +20,14 @@ export interface CucoInstance {
   group: THREE.Group;
   eyes: THREE.Mesh[];
   eyeLight: THREE.PointLight;
+  head: THREE.Group | null;
   jaw: THREE.Group | null;
   leftArm: THREE.Group | null;
   rightArm: THREE.Group | null;
   originPos: THREE.Vector3;
   originRotY: number;
   inUse: boolean;
+  isJumpscaring: boolean;
 }
 
 export class RoomScene {
@@ -44,6 +46,7 @@ export class RoomScene {
   public flashlightTarget: THREE.Object3D;
   public isCucoInFlashlightBeam: boolean = false;
   private _camDir = new THREE.Vector3();
+  private _jumpscareTargetPos = new THREE.Vector3();
 
   // Lighting
   public lampLight: THREE.PointLight;
@@ -163,9 +166,13 @@ export class RoomScene {
     // Build the Cuco Monster Pool (up to 4 monsters for infinite mode)
     for (let i = 0; i < 4; i++) {
       const parts = this.buildCucoMonster();
-      const eyeLight = new THREE.PointLight(0xfacc15, 3.2, 5.0, 2);
-      eyeLight.position.set(0, 2.05, 0.35);
-      parts.group.add(eyeLight);
+      const eyeLight = new THREE.PointLight(0xfacc15, 3.2, 5.5, 1.8);
+      eyeLight.position.set(0, 0.1, 0.72);
+      if (parts.head) {
+        parts.head.add(eyeLight);
+      } else {
+        parts.group.add(eyeLight);
+      }
 
       const inst: CucoInstance = {
         id: '',
@@ -173,12 +180,14 @@ export class RoomScene {
         group: parts.group,
         eyes: parts.eyes,
         eyeLight,
+        head: parts.head,
         jaw: parts.jaw,
         leftArm: parts.leftArm,
         rightArm: parts.rightArm,
         originPos: new THREE.Vector3(0, -20, 0),
         originRotY: 0,
         inUse: false,
+        isJumpscaring: false,
       };
       inst.group.position.set(0, -20, 0);
       inst.group.visible = false;
@@ -482,10 +491,11 @@ export class RoomScene {
   }
 
   // --- CUCO MONSTER 3D MODEL ---
-  // Diamond/geometric head, staring glowing round eyes, jagged teeth, blocky torso, claw arms
+  // Diamond/geometric head, staring glowing round eyes, hinged gaping jaw with jagged teeth, blocky torso, claw arms
   private buildCucoMonster(): {
     group: THREE.Group;
     eyes: THREE.Mesh[];
+    head: THREE.Group | null;
     jaw: THREE.Group | null;
     leftArm: THREE.Group | null;
     rightArm: THREE.Group | null;
@@ -510,52 +520,66 @@ export class RoomScene {
     const pupilMat = new THREE.MeshBasicMaterial({
       color: 0x020202,
     });
+    const mouthCavityMat = new THREE.MeshBasicMaterial({
+      color: 0x050206,
+    });
     const toothMat = new THREE.MeshStandardMaterial({
       color: 0xf1f5f9,
       roughness: 0.2,
     });
 
-    // 1. Chiseled diamond/octahedral head
+    // 1. Neck-pivoted Head Group (rotates violently during Foxy-style jumpscare)
+    const headGroup = new THREE.Group();
+    headGroup.position.set(0, 1.95, 0);
+
     const headGeo = new THREE.OctahedronGeometry(0.38, 0);
     headGeo.scale(1.1, 1.25, 1.0);
-    const head = new THREE.Mesh(headGeo, bodyMat);
-    head.position.set(0, 1.95, 0);
-    monster.add(head);
+    const headMesh = new THREE.Mesh(headGeo, bodyMat);
+    headGroup.add(headMesh);
 
     // 2. Wide staring round eyes
     [-0.14, 0.14].forEach((xOffset) => {
       const eyeRim = new THREE.Mesh(new THREE.RingGeometry(0.03, 0.085, 16), accentMat);
-      eyeRim.position.set(xOffset, 2.05, 0.32);
-      monster.add(eyeRim);
+      eyeRim.position.set(xOffset, 0.10, 0.32);
+      headGroup.add(eyeRim);
 
       const eye = new THREE.Mesh(new THREE.CircleGeometry(0.07, 16), eyeGlowMat);
-      eye.position.set(xOffset, 2.05, 0.325);
-      monster.add(eye);
+      eye.position.set(xOffset, 0.10, 0.325);
+      headGroup.add(eye);
       eyes.push(eye);
 
       const pupil = new THREE.Mesh(new THREE.CircleGeometry(0.025, 12), pupilMat);
-      pupil.position.set(xOffset, 2.05, 0.33);
-      monster.add(pupil);
+      pupil.position.set(xOffset, 0.10, 0.33);
+      headGroup.add(pupil);
     });
 
-    // 3. Open mouth with jagged triangular teeth
+    // Dark inner maw cavity + upper fangs mounted to upper skull
+    const mawCavity = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.14, 0.16), mouthCavityMat);
+    mawCavity.position.set(0, -0.09, 0.26);
+    headGroup.add(mawCavity);
+
+    const toothGeo = new THREE.ConeGeometry(0.022, 0.06, 4);
+    for (let i = -3; i <= 3; i++) {
+      const tTooth = new THREE.Mesh(toothGeo, toothMat);
+      tTooth.position.set(i * 0.042, -0.04, 0.36);
+      tTooth.rotation.z = Math.PI;
+      headGroup.add(tTooth);
+    }
+
+    // 3. Hinged Lower Jaw (swings open + chomps during Foxy jumpscare)
     const jaw = new THREE.Group();
-    jaw.position.set(0, 1.85, 0.28);
-    const jawBase = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.08, 0.2), bodyMat);
+    jaw.position.set(0, -0.10, 0.14);
+    const jawBase = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.08, 0.24), bodyMat);
+    jawBase.position.set(0, -0.03, 0.14);
     jaw.add(jawBase);
 
     for (let i = -3; i <= 3; i++) {
-      const toothGeo = new THREE.ConeGeometry(0.022, 0.06, 4);
       const bTooth = new THREE.Mesh(toothGeo, toothMat);
-      bTooth.position.set(i * 0.045, 0.05, 0.08);
+      bTooth.position.set(i * 0.042, 0.03, 0.22);
       jaw.add(bTooth);
-
-      const tTooth = new THREE.Mesh(toothGeo, toothMat);
-      tTooth.position.set(i * 0.045, 0.15, 0.08);
-      tTooth.rotation.z = Math.PI;
-      jaw.add(tTooth);
     }
-    monster.add(jaw);
+    headGroup.add(jaw);
+    monster.add(headGroup);
 
     // 4. Blocky angular Torso
     const chest = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.45, 0.35), bodyMat);
@@ -618,6 +642,7 @@ export class RoomScene {
     return {
       group: monster,
       eyes,
+      head: headGroup,
       jaw,
       leftArm,
       rightArm,
@@ -782,6 +807,15 @@ export class RoomScene {
     this.digitalClockTexture.needsUpdate = true;
   }
 
+  private resetCucoPose(inst: CucoInstance) {
+    inst.isJumpscaring = false;
+    inst.group.rotation.set(0, 0, 0);
+    if (inst.head) inst.head.rotation.set(0, 0, 0);
+    if (inst.jaw) inst.jaw.rotation.set(0, 0, 0);
+    if (inst.leftArm) inst.leftArm.rotation.set(0, 0, 0);
+    if (inst.rightArm) inst.rightArm.rotation.set(0, 0, 0);
+  }
+
   // --- SPAWN OR RETREAT CUCO MONSTER ---
   public spawnCuco(location: MonsterLocation, id: string = 'default') {
     let inst = this.cucoPool.find((c) => c.inUse && c.id === id);
@@ -798,6 +832,7 @@ export class RoomScene {
     inst.originPos.set(loc.pos[0], loc.pos[1], loc.pos[2]);
     inst.originRotY = loc.rotY;
 
+    this.resetCucoPose(inst);
     inst.group.position.copy(inst.originPos);
     // Face player seated on the bed
     inst.group.lookAt(0, 1.25, 0.2);
@@ -819,6 +854,7 @@ export class RoomScene {
   public hideCuco(id: string = 'default') {
     const inst = this.cucoPool.find((c) => c.id === id);
     if (inst) {
+      this.resetCucoPose(inst);
       inst.group.visible = false;
       inst.group.position.set(0, -20, 0);
       inst.inUse = false;
@@ -832,6 +868,7 @@ export class RoomScene {
 
   public hideAllCucos() {
     this.cucoPool.forEach((inst) => {
+      this.resetCucoPose(inst);
       inst.group.visible = false;
       inst.group.position.set(0, -20, 0);
       inst.inUse = false;
@@ -843,38 +880,65 @@ export class RoomScene {
     });
   }
 
-  // --- JUMPSCARE LUNGE ANIMATION ---
+  // --- FOXY-STYLE AERIAL LUNGE JUMPSCARE ANIMATION ---
   public updateJumpscare(progress: number, id: string = 'default') {
     const inst = this.cucoPool.find((c) => c.id === id) || this.cucoPool.find((c) => c.inUse);
     if (!inst) return;
 
+    const pose = computeFoxyJumpscarePose(progress);
+
+    inst.isJumpscaring = true;
     inst.group.visible = true;
+    this.camera.updateMatrixWorld();
     const camPos = this.camera.position;
-    inst.group.position.lerpVectors(inst.originPos, camPos, progress * 0.95);
-    inst.group.lookAt(camPos.x, camPos.y, camPos.z);
+    this.camera.getWorldDirection(this._camDir);
 
-    // Eyes glow blood red
+    // Compensate forward head displacement caused by tilting the 2.925m-tall body forward by bodyPitchX
+    // so Cuco's roaring face & gaping jaw always land cleanly 0.78m in front of the camera lens
+    const headLocalHeight = 1.95 * 1.5;
+    const forwardHeadShift = headLocalHeight * Math.sin(pose.bodyPitchX);
+    const verticalHeadOffset = headLocalHeight * Math.cos(pose.bodyPitchX);
+    const desiredFaceDist = 0.78;
+
+    this._jumpscareTargetPos
+      .copy(camPos)
+      .addScaledVector(this._camDir, desiredFaceDist + forwardHeadShift);
+    this._jumpscareTargetPos.y = camPos.y + this._camDir.y * desiredFaceDist - verticalHeadOffset - 0.02;
+
+    inst.group.position.lerpVectors(inst.originPos, this._jumpscareTargetPos, pose.leapT);
+    inst.group.position.y += pose.arcY * (1 - pose.leapT * 0.65);
+
+    // Face camera directly, then tilt body forward into the aerial Foxy dive
+    inst.group.lookAt(camPos.x, inst.group.position.y + verticalHeadOffset, camPos.z);
+    inst.group.rotateX(pose.bodyPitchX);
+
+    // Violent erratic shake when in front of the player's face
+    if (progress > 0.25) {
+      const shakeAmp = 0.045 * Math.min(1, (progress - 0.25) / 0.2);
+      inst.group.position.x += (Math.random() - 0.5) * shakeAmp;
+      inst.group.position.y += (Math.random() - 0.5) * shakeAmp;
+    }
+
+    // Eyes glow blood red with intense strobing facial light
     inst.eyes.forEach((eye) => {
-      (eye.material as THREE.MeshBasicMaterial).color.setHex(0xff0000);
+      (eye.material as THREE.MeshBasicMaterial).color.setHex(0xff1e1e);
     });
-
     if (inst.eyeLight) {
-      inst.eyeLight.color.setHex(0xff0000);
-      inst.eyeLight.intensity = 9.0;
+      inst.eyeLight.color.setHex(0xff4422);
+      inst.eyeLight.intensity = pose.eyeLightIntensity;
       inst.eyeLight.visible = true;
     }
 
-    // Violent camera/monster shake
-    const shake = (Math.random() - 0.5) * 0.1 * progress;
-    inst.group.position.x += shake;
-    inst.group.position.y += shake;
-
+    // Violent head convulsion, wide snapping jaw, and Foxy wide-splayed claw arms
+    if (inst.head) {
+      inst.head.rotation.set(pose.headPitchX, pose.headYawY, pose.headRollZ);
+    }
     if (inst.jaw) {
-      inst.jaw.position.y = 1.85 - progress * 0.18;
+      inst.jaw.rotation.x = pose.jawRotX;
     }
     if (inst.leftArm && inst.rightArm) {
-      inst.leftArm.rotation.x = (-Math.PI / 2) * progress;
-      inst.rightArm.rotation.x = (-Math.PI / 2) * progress;
+      inst.leftArm.rotation.set(pose.leftArmRotX, 0, pose.leftArmRotZ);
+      inst.rightArm.rotation.set(pose.rightArmRotX, 0, pose.rightArmRotZ);
     }
   }
 
@@ -952,10 +1016,14 @@ export class RoomScene {
 
     // Cuco visibility: hidden when focused on console unless jumpscare is in progress
     const armAnimTime = this.elapsedTime * 3.0;
+    let anyJumpscaring = false;
     for (const inst of this.cucoPool) {
       if (!inst.inUse) continue;
 
-      if (lookingAtConsole) {
+      if (inst.isJumpscaring) {
+        inst.group.visible = true;
+        anyJumpscaring = true;
+      } else if (lookingAtConsole) {
         const distToCam = inst.group.position.distanceTo(this.camera.position);
         if (distToCam > 1.2) {
           inst.group.visible = false;
@@ -966,6 +1034,9 @@ export class RoomScene {
         if (inst.rightArm) inst.rightArm.rotation.z = -Math.sin(armAnimTime + inst.originPos.x) * 0.1;
       }
     }
+
+    // Drop/hide handheld console immediately when Cuco jumpscares so view is 100% clear
+    this.consoleMeshGroup.visible = !anyJumpscaring;
 
     // 4. Animate handheld console position and scale
     const isLandscape = this.camera.aspect > 1.2;

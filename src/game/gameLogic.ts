@@ -148,14 +148,83 @@ export const TUTORIAL_STORAGE_KEY = 'desvelada_tutorial_v2_seen';
 export const FINAL_BOSS_LEVEL = 15;
 
 /**
- * Shows the quick interactive tutorial ONLY on the player's first game after pressing JUGAR,
- * never on retries or subsequent sessions once seen.
+ * Plays the interactive tutorial every time a new game starts (both initial start and replays).
+ * Optional parameters remain accepted for signature compatibility.
  */
 export function shouldShowFirstTimeTutorial(
-  storedFlag: string | null | undefined,
-  isRetry: boolean
+  _storedFlag?: string | null,
+  _isRetry?: boolean
 ): boolean {
-  return !isRetry && storedFlag !== '1';
+  return true;
+}
+
+export interface FoxyJumpscarePose {
+  leapT: number;
+  arcY: number;
+  bodyPitchX: number;
+  headRollZ: number;
+  headYawY: number;
+  headPitchX: number;
+  jawRotX: number;
+  leftArmRotX: number;
+  leftArmRotZ: number;
+  rightArmRotX: number;
+  rightArmRotZ: number;
+  eyeLightIntensity: number;
+}
+
+/**
+ * Pure kinematics approximating the FNAF 2 Foxy jumpscare lunge:
+ * - Phase 1 (0..0.38): Explosive aerial arc leap toward the player's face with arms thrown wide & jaw snapping open.
+ * - Phase 2 (0.38..1.0): Face-to-face mid-air thrashing, violent head roll/snap, wide-chomping lower jaw, and clawing arms.
+ */
+export function computeFoxyJumpscarePose(progress: number): FoxyJumpscarePose {
+  const p = Math.max(0, Math.min(1, progress));
+  const leapPhase = Math.min(1, p / 0.28);
+  const leapT = 1 - Math.pow(1 - leapPhase, 3); // fast easeOutCubic surge
+
+  // Parabolic leap arc upward before locking in front of the player's face
+  const arcPhase = Math.min(1, p / 0.34);
+  const arcY = Math.sin(arcPhase * Math.PI) * 0.48;
+
+  // Body leans forward horizontally into the aerial dive
+  const bodyPitchX = 0.50 * leapT;
+
+  // Violent Foxy-style head convulsion & side-to-side whipping once in range
+  const thrashWeight = p > 0.20 ? Math.min(1, (p - 0.20) / 0.15) : 0;
+  const headRollZ = Math.sin(p * 46) * 0.24 * thrashWeight;
+  const headYawY = Math.cos(p * 38) * 0.18 * thrashWeight;
+  const headPitchX = -0.18 * leapT + Math.sin(p * 52) * 0.1 * thrashWeight;
+
+  // Wide hinged lower jaw snapping open and chomping rapidly
+  const jawBase = 0.84 * leapT;
+  const jawChomp = Math.sin(p * 40) * 0.24 * thrashWeight;
+  const jawRotX = Math.max(0, jawBase + jawChomp);
+
+  // Arms flung wide outward & forward like Foxy's clawing lunge
+  const leftArmRotX = -1.65 * leapT + Math.sin(p * 34) * 0.18 * thrashWeight;
+  const leftArmRotZ = -0.92 * leapT - Math.sin(p * 28) * 0.14 * thrashWeight;
+  const rightArmRotX = -1.52 * leapT - Math.sin(p * 34) * 0.18 * thrashWeight;
+  const rightArmRotZ = 0.88 * leapT + Math.cos(p * 28) * 0.14 * thrashWeight;
+
+  // Dramatic horror strobe lighting on face & gaping teeth
+  const strobe = 0.7 + 0.3 * Math.sin(p * 55);
+  const eyeLightIntensity = 9.0 + 10.0 * leapT * strobe;
+
+  return {
+    leapT,
+    arcY,
+    bodyPitchX,
+    headRollZ,
+    headYawY,
+    headPitchX,
+    jawRotX,
+    leftArmRotX,
+    leftArmRotZ,
+    rightArmRotX,
+    rightArmRotZ,
+    eyeLightIntensity,
+  };
 }
 
 /**

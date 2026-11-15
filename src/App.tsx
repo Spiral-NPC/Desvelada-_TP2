@@ -216,6 +216,9 @@ export default function App() {
           ? 'gameover'
           : 'playing';
       document.body.dataset.tutorial = showTutorial ? 'true' : 'false';
+      if (gameState !== 'jumpscare') {
+        delete document.body.dataset.jumpscareProgress;
+      }
     }
   }, [gameState, showTutorial]);
 
@@ -434,14 +437,15 @@ export default function App() {
     isDragging.current = false;
   };
 
-  // Restart game after Victory/GameOver (tutorial NEVER triggers on retry)
+  // Restart game after Victory/GameOver (tutorial plays every time a new match starts)
   const handleRestart = () => {
-    soundEngine.setTutorialSilent(false);
+    const shouldActivateTutorial = shouldShowFirstTimeTutorial();
+    soundEngine.setTutorialSilent(shouldActivateTutorial);
     soundEngine.stopHeartbeat();
     soundEngine.stopGameOverMusic();
     soundEngine.stopAmbienteMusic();
-    showTutorialRef.current = false;
-    setShowTutorial(false);
+    showTutorialRef.current = shouldActivateTutorial;
+    setShowTutorial(shouldActivateTutorial);
     gameTimeSecondsRef.current = 0;
     commitBoredom(15, true);
     setIsSleeping(false);
@@ -463,6 +467,7 @@ export default function App() {
     // If replaying after winning Classic Level 15, restart Classic from Level 1; otherwise keep level
     const restartFromLvl1 = gameState === 'victory' && modeRef.current === 'classic';
     miniGameRef.current?.reset(!restartFromLvl1);
+    miniGameRef.current?.setPaused(shouldActivateTutorial);
     const currentLevel = miniGameRef.current?.level ?? 1;
 
     const savedBest =
@@ -480,7 +485,9 @@ export default function App() {
       mode: stats.mode,
       highScore: savedBest,
     });
-    soundEngine.playConsolaMusic();
+    if (!shouldActivateTutorial) {
+      soundEngine.playConsolaMusic();
+    }
     setGameState('playing');
   };
 
@@ -722,12 +729,15 @@ export default function App() {
                   setShowGameOver(false);
 
                   // Instantly snap player's view straight towards the attacking Cuco!
+                  cameraPitch.current = 0.05;
                   targetPitch.current = 0.05;
                   lookingAtConsoleRef.current = false;
                   setLookingAtConsole(false);
                   const loc = RoomScene.LOCATIONS[m.location];
                   if (loc) {
-                    targetYaw.current = -Math.atan2(loc.pos[0], -loc.pos[2]);
+                    const attackYaw = -Math.atan2(loc.pos[0], -loc.pos[2]);
+                    cameraYaw.current = attackYaw;
+                    targetYaw.current = attackYaw;
                   }
 
                   // Stop gameplay audio & danger heartbeat immediately on jump/loss
@@ -745,6 +755,9 @@ export default function App() {
           // Play out 1.2 seconds of visceral terrifying jumpscare!
           jumpscareTimer.current += dt;
           const progress = Math.min(1.0, jumpscareTimer.current / 1.2);
+          if (typeof document !== 'undefined') {
+            document.body.dataset.jumpscareProgress = progress.toFixed(2);
+          }
 
           const attacker =
             monstersRef.current.find((m) => m.id === attackingMonsterId.current) ||
@@ -944,24 +957,21 @@ export default function App() {
         />
       )}
 
-      {/* --- TERRIFYING VISCERAL JUMPSCARE OVERLAY --- */}
+      {/* --- TERRIFYING VISCERAL JUMPSCARE OVERLAY (center clear for 3D Foxy lunge) --- */}
       {gameState === 'jumpscare' && !showGameOver && (
         <div className="pointer-events-none fixed inset-0 z-40 overflow-hidden select-none">
-          {/* Intense flashing red blood vignette */}
+          {/* Outer red blood vignette keeping center clear for the Cuco jumpscare */}
           <div
             className="absolute inset-0 animate-pulse"
             style={{
               background:
-                'radial-gradient(circle at center, rgba(239, 68, 68, 0.35) 0%, rgba(185, 28, 28, 0.8) 60%, rgba(69, 10, 10, 0.98) 100%)',
+                'radial-gradient(circle at center, transparent 26%, rgba(185, 28, 28, 0.42) 70%, rgba(69, 10, 10, 0.92) 100%)',
             }}
           />
-          {/* Glitch text */}
-          <div className="absolute inset-0 flex flex-col items-center justify-center p-4">
-            <div className="font-pixel text-2xl sm:text-4xl text-red-500 tracking-widest drop-shadow-[0_0_25px_rgba(255,0,0,1)] animate-bounce">
+          {/* Bottom banner so Cuco's face & jaws remain completely visible */}
+          <div className="absolute inset-0 flex flex-col items-center justify-end pb-8 p-4">
+            <div className="font-pixel text-lg sm:text-2xl text-red-500 tracking-widest drop-shadow-[0_0_20px_rgba(255,0,0,1)]">
               ¡EL CUCO TE ATRAPÓ!
-            </div>
-            <div className="mt-2 font-pixel text-xs text-red-200 tracking-wider">
-              EL MONSTRUO SE LANZÓ SOBRE TI
             </div>
           </div>
         </div>
