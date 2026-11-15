@@ -35,21 +35,21 @@ export const RotatePrompt: React.FC = () => {
   if (!isPortrait) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-6 backdrop-blur-md select-none text-slate-100 animate-in fade-in duration-300">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-6 select-none text-slate-100 animate-in fade-in duration-300">
       <div className="relative flex flex-col items-center max-w-xs text-center">
         {/* Glow */}
-        <div className="absolute -top-10 h-32 w-32 rounded-full bg-pink-600/30 blur-3xl pointer-events-none" />
+        <div className="absolute -top-10 h-32 w-32 rounded-full bg-[#f4b637]/25 blur-3xl pointer-events-none" />
 
         {/* Animated Phone Icon */}
-        <div className="relative mb-6 flex h-24 w-24 items-center justify-center rounded-3xl bg-slate-900 border border-slate-700 shadow-2xl">
-          <Smartphone className="h-12 w-12 text-pink-400 animate-pulse" />
-          <RotateCw className="absolute -bottom-2 -right-2 h-7 w-7 text-indigo-400 animate-spin" style={{ animationDuration: '4s' }} />
+        <div className="relative mb-6 flex h-24 w-24 items-center justify-center rounded-3xl bg-slate-900 border border-[#f4b637]/50 shadow-2xl">
+          <Smartphone className="h-12 w-12 text-[#f4b637] animate-pulse" />
+          <RotateCw className="absolute -bottom-2 -right-2 h-7 w-7 text-[#f4b637] animate-spin" style={{ animationDuration: '4s' }} />
         </div>
 
-        <h3 className="font-pixel text-sm tracking-wider text-pink-400 leading-snug">
+        <h3 className="font-pixel text-sm tracking-wider text-[#f4b637] leading-snug">
           GIRA TU DISPOSITIVO
         </h3>
-        <p className="mt-1 font-retro text-2xl text-slate-300">
+        <p className="mt-1 font-retro text-2xl text-slate-200">
           MODO HORIZONTAL OBLIGATORIO
         </p>
 
@@ -57,7 +57,7 @@ export const RotatePrompt: React.FC = () => {
           Para jugar con la consola en tus manos, explorar la gran habitación y tener los controles ergonómicos en tus pulgares, coloca tu teléfono o tablet en horizontal.
         </p>
 
-        <div className="mt-5 rounded-full bg-pink-950/60 px-4 py-1.5 border border-pink-700/50 text-[10px] font-pixel text-pink-300">
+        <div className="mt-5 rounded-full bg-[#f4b637]/15 px-4 py-1.5 border border-[#f4b637]/50 text-[10px] font-pixel text-[#f4b637]">
           GIRA LA PANTALLA PARA CONTINUAR
         </div>
       </div>

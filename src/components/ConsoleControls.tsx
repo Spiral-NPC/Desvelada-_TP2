@@ -104,8 +104,8 @@ export const ConsoleControls: React.FC<ConsoleControlsProps> = React.memo(({
               data-pressed={pressedDir === 'up' ? 'true' : 'false'}
               className={`absolute left-12 sm:left-14 top-0 flex h-12 w-12 sm:h-14 sm:w-14 items-center justify-center rounded-t-2xl border-2 text-slate-200 transition-all duration-75 ease-out origin-bottom cursor-pointer ${
                 pressedDir === 'up'
-                  ? 'translate-y-[3px] scale-[0.94] bg-pink-600 border-pink-400 shadow-[inset_0_3px_6px_rgba(0,0,0,0.6)] text-white'
-                  : 'bg-slate-900/95 border-slate-700 shadow-[0_4px_10px_rgba(0,0,0,0.85)] active:translate-y-[3px] active:scale-[0.94] active:bg-pink-600'
+                  ? 'translate-y-[3px] scale-[0.94] bg-[#f4b637] border-yellow-200 shadow-[inset_0_3px_6px_rgba(0,0,0,0.45)] text-slate-950'
+                  : 'bg-slate-900/95 border-[#f4b637]/45 shadow-[0_4px_10px_rgba(0,0,0,0.85)] active:translate-y-[3px] active:scale-[0.94] active:bg-[#f4b637] active:text-slate-950'
               }`}
             >
               <ArrowUp className="h-6 w-6 sm:h-7 sm:w-7" />
@@ -122,8 +122,8 @@ export const ConsoleControls: React.FC<ConsoleControlsProps> = React.memo(({
               data-pressed={pressedDir === 'down' ? 'true' : 'false'}
               className={`absolute bottom-0 left-12 sm:left-14 flex h-12 w-12 sm:h-14 sm:w-14 items-center justify-center rounded-b-2xl border-2 text-slate-200 transition-all duration-75 ease-out origin-top cursor-pointer ${
                 pressedDir === 'down'
-                  ? 'translate-y-[3px] scale-[0.94] bg-pink-600 border-pink-400 shadow-[inset_0_3px_6px_rgba(0,0,0,0.6)] text-white'
-                  : 'bg-slate-900/95 border-slate-700 shadow-[0_4px_10px_rgba(0,0,0,0.85)] active:translate-y-[3px] active:scale-[0.94] active:bg-pink-600'
+                  ? 'translate-y-[3px] scale-[0.94] bg-[#f4b637] border-yellow-200 shadow-[inset_0_3px_6px_rgba(0,0,0,0.45)] text-slate-950'
+                  : 'bg-slate-900/95 border-[#f4b637]/45 shadow-[0_4px_10px_rgba(0,0,0,0.85)] active:translate-y-[3px] active:scale-[0.94] active:bg-[#f4b637] active:text-slate-950'
               }`}
             >
               <ArrowDown className="h-6 w-6 sm:h-7 sm:w-7" />
@@ -140,8 +140,8 @@ export const ConsoleControls: React.FC<ConsoleControlsProps> = React.memo(({
               data-pressed={pressedDir === 'left' ? 'true' : 'false'}
               className={`absolute left-0 top-12 sm:top-14 flex h-12 w-12 sm:h-14 sm:w-14 items-center justify-center rounded-l-2xl border-2 text-slate-200 transition-all duration-75 ease-out origin-right cursor-pointer ${
                 pressedDir === 'left'
-                  ? 'translate-y-[3px] scale-[0.94] bg-pink-600 border-pink-400 shadow-[inset_0_3px_6px_rgba(0,0,0,0.6)] text-white'
-                  : 'bg-slate-900/95 border-slate-700 shadow-[0_4px_10px_rgba(0,0,0,0.85)] active:translate-y-[3px] active:scale-[0.94] active:bg-pink-600'
+                  ? 'translate-y-[3px] scale-[0.94] bg-[#f4b637] border-yellow-200 shadow-[inset_0_3px_6px_rgba(0,0,0,0.45)] text-slate-950'
+                  : 'bg-slate-900/95 border-[#f4b637]/45 shadow-[0_4px_10px_rgba(0,0,0,0.85)] active:translate-y-[3px] active:scale-[0.94] active:bg-[#f4b637] active:text-slate-950'
               }`}
             >
               <ArrowLeft className="h-6 w-6 sm:h-7 sm:w-7" />
@@ -158,16 +158,16 @@ export const ConsoleControls: React.FC<ConsoleControlsProps> = React.memo(({
               data-pressed={pressedDir === 'right' ? 'true' : 'false'}
               className={`absolute right-0 top-12 sm:top-14 flex h-12 w-12 sm:h-14 sm:w-14 items-center justify-center rounded-r-2xl border-2 text-slate-200 transition-all duration-75 ease-out origin-left cursor-pointer ${
                 pressedDir === 'right'
-                  ? 'translate-y-[3px] scale-[0.94] bg-pink-600 border-pink-400 shadow-[inset_0_3px_6px_rgba(0,0,0,0.6)] text-white'
-                  : 'bg-slate-900/95 border-slate-700 shadow-[0_4px_10px_rgba(0,0,0,0.85)] active:translate-y-[3px] active:scale-[0.94] active:bg-pink-600'
+                  ? 'translate-y-[3px] scale-[0.94] bg-[#f4b637] border-yellow-200 shadow-[inset_0_3px_6px_rgba(0,0,0,0.45)] text-slate-950'
+                  : 'bg-slate-900/95 border-[#f4b637]/45 shadow-[0_4px_10px_rgba(0,0,0,0.85)] active:translate-y-[3px] active:scale-[0.94] active:bg-[#f4b637] active:text-slate-950'
               }`}
             >
               <ArrowRight className="h-6 w-6 sm:h-7 sm:w-7" />
             </button>
 
             {/* Center block */}
-            <div className="absolute left-12 sm:left-14 top-12 sm:top-14 h-12 w-12 sm:h-14 sm:w-14 bg-slate-950 border-2 border-slate-800 shadow-inner flex items-center justify-center">
-              <div className="h-4 w-4 rounded-full bg-slate-800/80" />
+            <div className="absolute left-12 sm:left-14 top-12 sm:top-14 h-12 w-12 sm:h-14 sm:w-14 bg-slate-950 border-2 border-[#f4b637]/30 shadow-inner flex items-center justify-center">
+              <div className="h-4 w-4 rounded-full bg-[#f4b637]/30" />
             </div>
           </div>
         </div>
@@ -184,15 +184,15 @@ export const ConsoleControls: React.FC<ConsoleControlsProps> = React.memo(({
             onPointerCancel={handleAPointerUp}
             aria-label="Botón A Disparo"
             data-pressed={isAPressed ? 'true' : 'false'}
-            className={`flex h-20 w-20 sm:h-24 sm:w-24 items-center justify-center rounded-full border-2 sm:border-3 font-pixel text-base sm:text-lg font-bold text-white transition-all duration-75 ease-out cursor-pointer ${
+            className={`flex h-20 w-20 sm:h-24 sm:w-24 items-center justify-center rounded-full border-2 sm:border-3 font-pixel text-base sm:text-lg font-bold text-slate-950 transition-all duration-75 ease-out cursor-pointer ${
               isAPressed
-                ? 'translate-y-[4px] scale-[0.92] bg-pink-700 border-pink-200 shadow-[inset_0_4px_10px_rgba(0,0,0,0.65),0_0_12px_rgba(236,72,153,0.4)]'
-                : '-translate-y-1 bg-gradient-to-br from-pink-500 to-rose-600 border-pink-300 shadow-[0_6px_0_#9d174d,0_10px_25px_rgba(236,72,153,0.55)] ring-2 ring-pink-500/30 active:translate-y-[4px] active:scale-[0.92]'
+                ? 'translate-y-[4px] scale-[0.92] bg-[#d99b1e] border-yellow-100 shadow-[inset_0_4px_10px_rgba(0,0,0,0.45),0_0_12px_rgba(244,182,55,0.45)]'
+                : '-translate-y-1 bg-[#f4b637] border-yellow-200 shadow-[0_6px_0_#a6740d,0_10px_25px_rgba(244,182,55,0.45)] ring-2 ring-[#f4b637]/35 active:translate-y-[4px] active:scale-[0.92]'
             }`}
           >
             A
           </button>
-          <span className="font-pixel text-[9px] sm:text-[10px] text-pink-300 tracking-wider">
+          <span className="font-pixel text-[9px] sm:text-[10px] text-[#f4b637] tracking-wider">
             DISPARO
           </span>
         </div>

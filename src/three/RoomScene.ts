@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { MiniGameEngine } from '../minigames/MiniGameEngine';
 import { MonsterLocation } from '../types';
+import { isFlashlightHittingCucoBody } from '../game/gameLogic';
 
 export interface CucoInstance {
   id: string;
@@ -43,7 +44,6 @@ export class RoomScene {
   public flashlightTarget: THREE.Object3D;
   public isCucoInFlashlightBeam: boolean = false;
   private _camDir = new THREE.Vector3();
-  private _toCucoVec = new THREE.Vector3();
 
   // Lighting
   public lampLight: THREE.PointLight;
@@ -910,14 +910,12 @@ export class RoomScene {
     this.flashlight.position.copy(this.camera.position);
     this.flashlightTarget.position.copy(this.camera.position).addScaledVector(this._camDir, 8);
 
-    // 3. Detect if player is aiming the flashlight directly at an active Cuco (within ~24 degrees)
+    // 3. Detect if player is aiming the flashlight at ANY part of an active Cuco's full body
     let cucoSpotted = false;
     if (!lookingAtConsole) {
       for (const inst of this.cucoPool) {
         if (!inst.inUse) continue;
-        this._toCucoVec.subVectors(inst.group.position, this.camera.position).normalize();
-        const dot = this._camDir.dot(this._toCucoVec);
-        if (dot > 0.91) {
+        if (isFlashlightHittingCucoBody(this.camera.position, this._camDir, inst.group.position)) {
           cucoSpotted = true;
           break;
         }
@@ -927,12 +925,12 @@ export class RoomScene {
 
     // 4. Flashlight intensity & flickering:
     // Off when looking at console
-    // When aiming at Cuco: FLICKERS RAPIDLY to alert player that Cuco has been illuminated!
+    // When aiming at Cuco: flickers subtly/nervously so the player notices the beam reaction!
     let targetFlashlightIntensity = 0.0;
     if (!lookingAtConsole) {
       if (cucoSpotted) {
-        const flickerPattern =
-          Math.sin(this.elapsedTime * 40.0) > -0.15 ? (Math.random() > 0.3 ? 9.8 : 2.5) : 0.4;
+        const wave = Math.sin(this.elapsedTime * 34.0);
+        const flickerPattern = wave > -0.2 ? (Math.random() > 0.25 ? 9.2 : 5.2) : 2.8;
         targetFlashlightIntensity = flickerPattern;
       } else {
         targetFlashlightIntensity = 8.5;
@@ -942,7 +940,7 @@ export class RoomScene {
     this.flashlight.intensity = THREE.MathUtils.damp(
       this.flashlight.intensity,
       targetFlashlightIntensity,
-      cucoSpotted ? 32 : 12,
+      cucoSpotted ? 26 : 12,
       dt
     );
     // Skip inactive SpotLight & bedside PointLight shading passes when looking at the console

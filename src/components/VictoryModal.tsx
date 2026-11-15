@@ -1,10 +1,10 @@
 /**
- * Victory Screen when player reaches 6:00 AM dawn.
+ * Victory Screen when player defeats the Level 15 Crowned Final Boss in Classic mode.
  */
 
 import React, { useEffect } from 'react';
 import confetti from 'canvas-confetti';
-import { Sun, Award, ShieldCheck, RotateCcw, Home } from 'lucide-react';
+import { Crown, Award, ShieldCheck, RotateCcw, Home } from 'lucide-react';
 import { GameStats } from '../types';
 
 interface VictoryModalProps {
@@ -23,31 +23,31 @@ export const VictoryModal: React.FC<VictoryModalProps> = ({ stats, onRestart, on
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-md select-none">
-      <div className="relative w-full max-w-sm rounded-3xl bg-slate-950 p-6 text-center text-slate-100 shadow-2xl border border-amber-500/40">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 select-none">
+      <div className="relative w-full max-w-sm rounded-3xl bg-slate-950 p-6 text-center text-slate-100 shadow-2xl border-2 border-[#f4b637]/60">
         {/* Glow */}
-        <div className="absolute -top-12 left-1/2 -translate-x-1/2 h-24 w-48 rounded-full bg-amber-500/30 blur-3xl" />
+        <div className="absolute -top-12 left-1/2 -translate-x-1/2 h-24 w-48 rounded-full bg-[#f4b637]/30 blur-3xl" />
 
-        <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-950/70 border border-amber-500/50">
-          <Sun className="h-9 w-9 text-amber-400 animate-spin-slow" />
+        <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-[#f4b637]/15 border border-[#f4b637]/60">
+          <Crown className="h-9 w-9 text-[#f4b637]" />
         </div>
 
-        <h2 className="font-pixel text-lg tracking-wider text-amber-300">
-          ¡6:00 AM - AMANECIÓ!
+        <h2 className="font-pixel text-base sm:text-lg tracking-wider text-[#f4b637]">
+          ¡VICTORIA! NIVEL 15 SUPERADO
         </h2>
 
         <p className="mt-2 text-xs text-slate-300 font-sans-modern">
-          ¡Sobreviviste toda la desvelada! Los rayos del sol entran por tu ventana y el Cuco ha desaparecido.
+          ¡Derrotaste al Jefe Final con corona en la consola portátil y sobreviviste toda la noche frente al Cuco!
         </p>
 
         {/* Stats */}
-        <div className="my-5 grid grid-cols-2 gap-3 rounded-2xl bg-slate-900/60 p-3.5 border border-slate-800 text-left font-sans-modern">
+        <div className="my-5 grid grid-cols-2 gap-3 rounded-2xl bg-slate-900/70 p-3.5 border border-[#f4b637]/25 text-left font-sans-modern">
           <div>
             <div className="flex items-center gap-1 text-[11px] text-slate-400">
-              <Award className="h-3.5 w-3.5 text-amber-400" />
+              <Award className="h-3.5 w-3.5 text-[#f4b637]" />
               Puntuación Total
             </div>
-            <div className="font-pixel text-sm text-amber-300 mt-1">
+            <div className="font-pixel text-sm text-[#f4b637] mt-1">
               {stats.score}
             </div>
           </div>
@@ -66,18 +66,18 @@ export const VictoryModal: React.FC<VictoryModalProps> = ({ stats, onRestart, on
         <div className="flex flex-col gap-2">
           <button
             onClick={onRestart}
-            className="w-full flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-amber-500 to-pink-600 py-3 font-pixel text-xs font-bold text-white shadow-xl hover:opacity-95 active:scale-95 transition"
+            className="w-full flex items-center justify-center gap-2 rounded-2xl bg-[#f4b637] hover:bg-[#f7c55c] py-3 font-pixel text-xs font-bold text-slate-950 shadow-[0_4px_18px_rgba(244,182,55,0.4)] active:scale-95 transition cursor-pointer"
           >
             <RotateCcw className="h-4 w-4" />
-            <span>JUGAR OTRA NOCHE</span>
+            <span>JUGAR OTRA PARTIDA</span>
           </button>
 
           {onMainMenu && (
             <button
               onClick={onMainMenu}
-              className="w-full flex items-center justify-center gap-2 rounded-2xl bg-slate-900 hover:bg-slate-800 py-2.5 font-pixel text-[11px] text-slate-300 border border-slate-700 active:scale-95 transition"
+              className="w-full flex items-center justify-center gap-2 rounded-2xl bg-slate-900 hover:bg-slate-800 py-2.5 font-pixel text-[11px] text-slate-200 border border-slate-700 active:scale-95 transition cursor-pointer"
             >
-              <Home className="h-3.5 w-3.5 text-slate-400" />
+              <Home className="h-3.5 w-3.5 text-[#f4b637]" />
               <span>VOLVER AL INICIO</span>
             </button>
           )}

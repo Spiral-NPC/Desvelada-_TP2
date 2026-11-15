@@ -8,6 +8,15 @@ import {
   shouldPlayRoomCreak,
   computeNextBoredom,
   shouldSyncBoredomUi,
+  FINAL_BOSS_LEVEL,
+  shouldShowFirstTimeTutorial,
+  shouldWinClassicOnLevelClear,
+  isFlashlightHittingCucoBody,
+  CUCO_SOUND_TRACKS,
+  computeRemainingLevels,
+  isHudImminentDanger,
+  computeCucoScreechVolume,
+  pickNextCucoTrackIndex,
 } from './gameLogic';
 
 test('Cuco spawn rate uses gentle 0.85x reduction (interval divided by 0.85)', () => {
@@ -71,3 +80,78 @@ test('Boredom UI sync avoids per-frame churn while committing integer/threshold 
   assert.equal(shouldSyncBoredomUi(99.8, 100, 16), true);
   assert.equal(shouldSyncBoredomUi(0.4, 0, 16), true);
 });
+
+test('First-time tutorial appears only on initial start and never on retries or subsequent plays', () => {
+  assert.equal(shouldShowFirstTimeTutorial(null, false), true);
+  assert.equal(shouldShowFirstTimeTutorial('1', false), false);
+  assert.equal(shouldShowFirstTimeTutorial(null, true), false);
+  assert.equal(shouldShowFirstTimeTutorial('1', true), false);
+});
+
+test('Classic mode wins upon clearing Level 15 Final Boss while infinite continues endlessly', () => {
+  assert.equal(FINAL_BOSS_LEVEL, 15);
+  assert.equal(shouldWinClassicOnLevelClear('classic', 14), false);
+  assert.equal(shouldWinClassicOnLevelClear('classic', 15), true);
+  assert.equal(shouldWinClassicOnLevelClear('infinite', 15), false);
+});
+
+test('Full-body Cuco hitbox detects flashlight aimed at feet, torso, arms, or head', () => {
+  const camPos = { x: 0, y: 1.25, z: 0.2 };
+  const cucoBase = { x: 0, y: 0, z: -9.2 };
+  const normalize = (x: number, y: number, z: number) => {
+    const len = Math.hypot(x, y, z);
+    return { x: x / len, y: y / len, z: z / len };
+  };
+
+  // Aim at head (y = 3.0)
+  assert.equal(
+    isFlashlightHittingCucoBody(camPos, normalize(0, 3.0 - 1.25, -9.2 - 0.2), cucoBase),
+    true
+  );
+  // Aim at chest/arm offset (x = 0.65, y = 2.0)
+  assert.equal(
+    isFlashlightHittingCucoBody(camPos, normalize(0.65, 2.0 - 1.25, -9.2 - 0.2), cucoBase),
+    true
+  );
+  // Aim at feet (y = 0.25)
+  assert.equal(
+    isFlashlightHittingCucoBody(camPos, normalize(0, 0.25 - 1.25, -9.2 - 0.2), cucoBase),
+    true
+  );
+  // Aim well to the left/miss (x = -3.0)
+  assert.equal(
+    isFlashlightHittingCucoBody(camPos, normalize(-3.0, 1.5 - 1.25, -9.2 - 0.2), cucoBase),
+    false
+  );
+});
+
+test('Remaining levels indicator reflects classic levels left and returns null in infinite mode', () => {
+  assert.equal(computeRemainingLevels('classic', 1), 15);
+  assert.equal(computeRemainingLevels('classic', 14), 2);
+  assert.equal(computeRemainingLevels('classic', 15), 1);
+  assert.equal(computeRemainingLevels('infinite', 1), null);
+});
+
+test('HUD imminent danger alert activates on high boredom (>65) or spotted Cuco', () => {
+  assert.equal(isHudImminentDanger({ boredom: 20, cucoInBeam: false }), false);
+  assert.equal(isHudImminentDanger({ boredom: 65, cucoInBeam: false }), false);
+  assert.equal(isHudImminentDanger({ boredom: 66, cucoInBeam: false }), true);
+  assert.equal(isHudImminentDanger({ boredom: 15, cucoInBeam: true }), true);
+});
+
+test('Cuco screech volume varies in [0.62, 0.94] and track picker never repeats last MP3', () => {
+  assert.equal(CUCO_SOUND_TRACKS.length, 5);
+  assert.ok(Math.abs(computeCucoScreechVolume(0) - 0.62) < 1e-9);
+  assert.ok(Math.abs(computeCucoScreechVolume(1) - 0.94) < 1e-9);
+  const midVol = computeCucoScreechVolume(0.5);
+  assert.ok(midVol > 0.62 && midVol < 0.94);
+
+  for (let last = 0; last < CUCO_SOUND_TRACKS.length; last++) {
+    for (const r of [0, 0.25, 0.5, 0.75, 0.99]) {
+      const next = pickNextCucoTrackIndex(last, CUCO_SOUND_TRACKS.length, r);
+      assert.notEqual(next, last);
+      assert.ok(next >= 0 && next < CUCO_SOUND_TRACKS.length);
+    }
+  }
+});
+

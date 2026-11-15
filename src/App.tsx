@@ -16,10 +16,14 @@ import {
   shouldPlayRoomCreak,
   computeNextBoredom,
   shouldSyncBoredomUi,
+  TUTORIAL_STORAGE_KEY,
+  shouldShowFirstTimeTutorial,
+  shouldWinClassicOnLevelClear,
 } from './game/gameLogic';
 import { HUD } from './components/HUD';
 import { ConsoleControls } from './components/ConsoleControls';
 import { PermissionsModal } from './components/PermissionsModal';
+import { TutorialOverlay } from './components/TutorialOverlay';
 import { VictoryModal } from './components/VictoryModal';
 import { RotatePrompt } from './components/RotatePrompt';
 import { EyelidsOverlay } from './components/EyelidsOverlay';
@@ -73,7 +77,11 @@ export default function App() {
 
   const [cucoInBeam, setCucoInBeam] = useState<boolean>(false);
   const cucoInBeamRef = useRef<boolean>(false);
+  const lastBeamScreechAtRef = useRef<number>(0);
   const [lossNotice, setLossNotice] = useState<'cuco' | 'sleep' | null>(null);
+  const [showTutorial, setShowTutorial] = useState<boolean>(false);
+  const showTutorialRef = useRef<boolean>(false);
+  showTutorialRef.current = showTutorial;
 
   // Camera orientation angles (Euler radians)
   const cameraYaw = useRef<number>(0);
@@ -145,6 +153,24 @@ export default function App() {
       });
     };
 
+    // Classic Mode Victory: Reach and clear Level 15 (Crowned Final Boss)
+    miniGame.onLevelCleared = (clearedLevel) => {
+      if (shouldWinClassicOnLevelClear(modeRef.current, clearedLevel)) {
+        soundEngine.stopAmbienteMusic();
+        soundEngine.stopConsolaMusic();
+        soundEngine.playVictoryFanfare();
+        setStats((prev) => ({
+          ...prev,
+          level: clearedLevel,
+          score: miniGame.score,
+          highScore: Math.max(prev.highScore, miniGame.score),
+        }));
+        setGameState('victory');
+        return true;
+      }
+      return false;
+    };
+
     const roomScene = new RoomScene(mountRef.current, miniGame);
     sceneRef.current = roomScene;
 
@@ -186,25 +212,37 @@ export default function App() {
     }
   }, [gameState]);
 
-  // Support ?autostart=1 to jump directly into gameplay
+  // Support ?autostart=1 (and optional ?level=15 / ?tutorial=1) to jump directly into gameplay
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       if (params.get('autostart') === '1' && gameStateRef.current === 'intro') {
-        handleStartGame({ mode: 'classic' });
+        const parsedLevel = parseInt(params.get('level') || '0', 10);
+        handleStartGame({
+          mode: 'classic',
+          skipTutorial: params.get('tutorial') !== '1',
+          startLevel: parsedLevel > 0 ? parsedLevel : undefined,
+        });
       }
     }
   }, []);
 
   // --- START GAME (Touch only) ---
-  const handleStartGame = (options: { mode: GameMode }) => {
+  const handleStartGame = (options: { mode: GameMode; skipTutorial?: boolean; startLevel?: number }) => {
     soundEngine.init();
     soundEngine.stopGameOverMusic();
     soundEngine.stopAmbienteMusic();
     setLossNotice(null);
     modeRef.current = options.mode;
     gameTimeSecondsRef.current = 0;
-    setStats((prev) => ({ ...prev, mode: options.mode }));
+
+    const storedFlag =
+      typeof window !== 'undefined' ? localStorage.getItem(TUTORIAL_STORAGE_KEY) : '1';
+    const shouldActivateTutorial =
+      !options.skipTutorial && shouldShowFirstTimeTutorial(storedFlag, false);
+    showTutorialRef.current = shouldActivateTutorial;
+    setShowTutorial(shouldActivateTutorial);
+
     commitBoredom(15, true);
     setIsSleeping(false);
     lookingAtConsoleRef.current = true;
@@ -216,13 +254,43 @@ export default function App() {
     cucoSpawnCountdown.current = computeInitialCucoSpawnDelay();
     creakCountdown.current = computeNextCreakDelay();
     jumpscareTimer.current = 0;
+    lastBeamScreechAtRef.current = 0;
     setShowGameOver(false);
     sceneRef.current?.hideAllCucos();
-    miniGameRef.current?.reset(false);
+
+    if (miniGameRef.current) {
+      if (options.startLevel && options.startLevel > 1) {
+        miniGameRef.current.level = options.startLevel;
+        miniGameRef.current.reset(true);
+      } else {
+        miniGameRef.current.reset(false);
+      }
+      miniGameRef.current.setPaused(shouldActivateTutorial);
+    }
+
+    setStats((prev) => ({
+      ...prev,
+      mode: options.mode,
+      level: miniGameRef.current?.level ?? 1,
+      score: 0,
+      monstersRepelled: 0,
+      currentHour: 0,
+      gameTimeSeconds: 0,
+    }));
+
     // Player starts looking at console, play console track
     soundEngine.playConsolaMusic();
     setGameState('playing');
   };
+
+  const handleTutorialComplete = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(TUTORIAL_STORAGE_KEY, '1');
+    }
+    showTutorialRef.current = false;
+    setShowTutorial(false);
+    miniGameRef.current?.setPaused(false);
+  }, []);
 
   // Toggle Mute
   const toggleMute = useCallback(() => {
@@ -340,10 +408,12 @@ export default function App() {
     isDragging.current = false;
   };
 
-  // Restart game after GameOver
+  // Restart game after Victory/GameOver (tutorial NEVER triggers on retry)
   const handleRestart = () => {
     soundEngine.stopGameOverMusic();
     soundEngine.stopAmbienteMusic();
+    showTutorialRef.current = false;
+    setShowTutorial(false);
     gameTimeSecondsRef.current = 0;
     commitBoredom(15, true);
     setIsSleeping(false);
@@ -356,12 +426,14 @@ export default function App() {
     cucoSpawnCountdown.current = computeInitialCucoSpawnDelay();
     creakCountdown.current = computeNextCreakDelay();
     jumpscareTimer.current = 0;
+    lastBeamScreechAtRef.current = 0;
     setShowGameOver(false);
     sceneRef.current?.hideAllCucos();
 
-    // Preserve the level achieved in Space Invaders!
-    const currentLevel = stats.level;
-    miniGameRef.current?.reset(true);
+    // If replaying after winning Classic Level 15, restart Classic from Level 1; otherwise keep level
+    const restartFromLvl1 = gameState === 'victory' && modeRef.current === 'classic';
+    miniGameRef.current?.reset(!restartFromLvl1);
+    const currentLevel = miniGameRef.current?.level ?? 1;
 
     const savedBest =
       typeof window !== 'undefined'
@@ -389,6 +461,8 @@ export default function App() {
     if (!soundEngine.isGameOverPlaying()) {
       soundEngine.playAmbienteMusic();
     }
+    showTutorialRef.current = false;
+    setShowTutorial(false);
     gameTimeSecondsRef.current = 0;
     commitBoredom(15, true);
     setIsSleeping(false);
@@ -401,6 +475,7 @@ export default function App() {
     cucoSpawnCountdown.current = computeInitialCucoSpawnDelay();
     creakCountdown.current = computeNextCreakDelay();
     jumpscareTimer.current = 0;
+    lastBeamScreechAtRef.current = 0;
     setShowGameOver(false);
     sceneRef.current?.hideAllCucos();
     miniGameRef.current?.reset(false);
@@ -474,8 +549,10 @@ export default function App() {
           }
         }
 
+        const tutorialActive = showTutorialRef.current;
+
         // Subtle random bedroom creaking sounds when focused on the console to build tension
-        if (shouldPlayRoomCreak({ gameState, lookingAtConsole: isLookingDown, isSleeping })) {
+        if (!tutorialActive && shouldPlayRoomCreak({ gameState, lookingAtConsole: isLookingDown, isSleeping })) {
           creakCountdown.current -= dt;
           if (creakCountdown.current <= 0) {
             soundEngine.playRoomCreak();
@@ -484,17 +561,17 @@ export default function App() {
         }
 
         // PAUSE / RESUME MINIGAME:
-        // When looking down, minigame runs active!
-        // When looking up at the room OR feigning sleep, minigame pauses immediately!
-        if (isLookingDown && !isSleeping && gameState === 'playing') {
+        // When looking down (and tutorial is not blocking), minigame runs active!
+        // When looking up at the room, tutorial is open, OR feigning sleep, minigame pauses immediately!
+        if (!tutorialActive && isLookingDown && !isSleeping && gameState === 'playing') {
           miniGame.setPaused(false);
           miniGame.update(dt);
         } else {
           miniGame.setPaused(true);
         }
 
-        // 2. State specific updates
-        if (gameState === 'playing') {
+        // 2. State specific updates (frozen while first-time tutorial overlay is open)
+        if (gameState === 'playing' && !tutorialActive) {
           // --- Clock & Night Progression ---
           clockTickTimer += dt;
           if (clockTickTimer >= 1.0) {
@@ -504,17 +581,9 @@ export default function App() {
               const newSeconds = prev.gameTimeSeconds + 1;
               gameTimeSecondsRef.current = newSeconds;
               const hour = Math.floor(newSeconds / 40);
-              const hourDisplay = hour === 0 ? '12:00 AM' : `${hour}:00 AM`;
+              const wrappedHour = hour % 12;
+              const hourDisplay = wrappedHour === 0 ? '12:00 AM' : `${wrappedHour}:00 AM`;
               scene.updateClockDisplay(hourDisplay);
-
-              // Check 6:00 AM Dawn victory ONLY in classic mode!
-              // In infinite mode, the night never ends!
-              if (prev.mode === 'classic' && hour >= 6) {
-                soundEngine.stopAmbienteMusic();
-                soundEngine.stopConsolaMusic();
-                soundEngine.playVictoryFanfare();
-                setGameState('victory');
-              }
 
               return {
                 ...prev,
@@ -669,6 +738,13 @@ export default function App() {
         if (cucoInBeamRef.current !== nextCucoInBeam) {
           cucoInBeamRef.current = nextCucoInBeam;
           setCucoInBeam(nextCucoInBeam);
+          if (nextCucoInBeam && gameState === 'playing' && !showTutorialRef.current) {
+            const nowMs = performance.now();
+            if (nowMs - lastBeamScreechAtRef.current > 1400) {
+              lastBeamScreechAtRef.current = nowMs;
+              soundEngine.playCucoBeamScreech();
+            }
+          }
         }
       }
 
@@ -708,9 +784,6 @@ export default function App() {
   const handleButtonAPress = useCallback(() => {
     miniGameRef.current?.triggerActionA();
   }, []);
-
-  const timeString =
-    stats.currentHour === 0 ? '12:00 AM' : `${stats.currentHour}:00 AM`;
 
   return (
     <div
@@ -768,7 +841,7 @@ export default function App() {
         <>
           <HUD
             boredom={boredom}
-            timeString={timeString}
+            score={stats.score}
             gameTimeSeconds={stats.gameTimeSeconds}
             level={stats.level}
             mode={stats.mode}
@@ -786,6 +859,11 @@ export default function App() {
             visible={lookingAtConsole}
             onDpadChange={handleDpadChange}
             onButtonAPress={handleButtonAPress}
+          />
+
+          <TutorialOverlay
+            visible={showTutorial}
+            onComplete={handleTutorialComplete}
           />
         </>
       )}

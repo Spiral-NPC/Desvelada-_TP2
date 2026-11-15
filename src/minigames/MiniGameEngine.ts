@@ -23,6 +23,7 @@ export interface Alien {
   color: string;
   isArmored?: boolean;
   isBoss?: boolean;
+  isFinalBoss?: boolean;
   scoreValue: number;
   width: number;
   height: number;
@@ -38,10 +39,12 @@ export class MiniGameEngine {
   public isPaused: boolean = false;
   public isLevelClear: boolean = false;
   public levelClearTimer: number = 0;
+  public finalBossIntroTimer: number = 0;
   public levelTitle: string = '';
 
   public onActionSuccess?: () => void; // reduces boredom
   public onLevelUp?: (level: number) => void;
+  public onLevelCleared?: (clearedLevel: number) => boolean | void;
 
   // Input state
   public dpadLeft: boolean = false;
@@ -154,6 +157,7 @@ export class MiniGameEngine {
     this.isGameOver = false;
     this.isLevelClear = false;
     this.levelClearTimer = 0;
+    this.finalBossIntroTimer = 0;
 
     if (!keepLevel) {
       this.level = 1;
@@ -173,7 +177,52 @@ export class MiniGameEngine {
 
   private spawnAlienWave() {
     this.space.aliens = [];
+    const isFinalBoss = this.level === 15;
     const isBossLevel = this.level % 5 === 0;
+
+    if (isFinalBoss) {
+      // --- LEVEL 15: DISTINCT CROWNED FINAL BOSS ---
+      this.levelTitle = 'JEFE FINAL';
+      this.finalBossIntroTimer = 2.6;
+      const bossHp = 36;
+      const boss: Alien = {
+        x: 120,
+        y: 48,
+        vx: 2.1,
+        row: 0,
+        hp: bossHp,
+        maxHp: bossHp,
+        alive: true,
+        color: '#7e22ce', // Royal dark violet armor (distinct from basic crimson boss)
+        isBoss: true,
+        isFinalBoss: true,
+        scoreValue: 5000,
+        width: 52,
+        height: 22,
+      };
+      this.space.boss = boss;
+      this.space.aliens.push(boss);
+
+      // 2 golden armored royal guards
+      for (let i = -1; i <= 1; i += 2) {
+        this.space.aliens.push({
+          x: 120 + i * 52,
+          y: 67,
+          vx: 2.0,
+          row: 1,
+          hp: 2,
+          maxHp: 2,
+          alive: true,
+          isArmored: true,
+          color: '#f4b637',
+          scoreValue: 100,
+          width: 16,
+          height: 10,
+        });
+      }
+      this.space.totalWaveAliens = 3;
+      return;
+    }
 
     if (isBossLevel) {
       // --- BOSS LEVEL (Mothership) ---
@@ -379,12 +428,21 @@ export class MiniGameEngine {
       this.levelClearTimer -= dt;
       if (this.levelClearTimer <= 0) {
         this.isLevelClear = false;
+        const wonGame = this.onLevelCleared?.(this.level);
+        if (wonGame) {
+          this.render();
+          return;
+        }
         this.level++;
         this.onLevelUp?.(this.level);
         this.reset(true); // advance to next level!
       }
       this.render();
       return;
+    }
+
+    if (this.finalBossIntroTimer > 0) {
+      this.finalBossIntroTimer = Math.max(0, this.finalBossIntroTimer - dt);
     }
 
     this.updateSpace(dt);
@@ -498,23 +556,33 @@ export class MiniGameEngine {
       }
     }
 
-    // Alien bombs / Boss triple cannons (relaxed interval)
-    this.space.alienDropTimer += dt;
-    const isBoss = !!this.space.boss?.alive;
-    const bombInterval = isBoss ? 1.0 : Math.max(0.7, 2.2 - this.level * 0.15);
+    // Alien bombs / Boss cannons (hold fire briefly during final boss announcement banner)
+    if (this.finalBossIntroTimer <= 0) {
+      this.space.alienDropTimer += dt;
+      const boss = this.space.boss;
+      const isBoss = !!boss?.alive;
+      const isFinalBoss = !!boss?.isFinalBoss;
+      const bombInterval = isFinalBoss ? 0.9 : isBoss ? 1.0 : Math.max(0.7, 2.2 - this.level * 0.15);
 
-    if (this.space.alienDropTimer > bombInterval) {
-      this.space.alienDropTimer = 0;
-      if (isBoss && this.space.boss) {
-        // Boss fires 3 spread orbs!
-        this.space.alienBombs.push({ x: this.space.boss.x - 12, y: this.space.boss.y + 10, vx: -0.5 });
-        this.space.alienBombs.push({ x: this.space.boss.x, y: this.space.boss.y + 12, vx: 0 });
-        this.space.alienBombs.push({ x: this.space.boss.x + 12, y: this.space.boss.y + 10, vx: 0.5 });
-      } else {
-        const aliveAliens = this.space.aliens.filter((a) => a.alive);
-        if (aliveAliens.length > 0) {
-          const shooter = aliveAliens[Math.floor(Math.random() * aliveAliens.length)];
-          this.space.alienBombs.push({ x: shooter.x, y: shooter.y + 6, vx: 0 });
+      if (this.space.alienDropTimer > bombInterval) {
+        this.space.alienDropTimer = 0;
+        if (isFinalBoss && boss) {
+          // Crowned Final Boss fires 4 spread royal plasma orbs
+          this.space.alienBombs.push({ x: boss.x - 16, y: boss.y + 11, vx: -0.75 });
+          this.space.alienBombs.push({ x: boss.x - 6, y: boss.y + 13, vx: -0.25 });
+          this.space.alienBombs.push({ x: boss.x + 6, y: boss.y + 13, vx: 0.25 });
+          this.space.alienBombs.push({ x: boss.x + 16, y: boss.y + 11, vx: 0.75 });
+        } else if (isBoss && boss) {
+          // Boss fires 3 spread orbs!
+          this.space.alienBombs.push({ x: boss.x - 12, y: boss.y + 10, vx: -0.5 });
+          this.space.alienBombs.push({ x: boss.x, y: boss.y + 12, vx: 0 });
+          this.space.alienBombs.push({ x: boss.x + 12, y: boss.y + 10, vx: 0.5 });
+        } else {
+          const aliveAliens = this.space.aliens.filter((a) => a.alive);
+          if (aliveAliens.length > 0) {
+            const shooter = aliveAliens[Math.floor(Math.random() * aliveAliens.length)];
+            this.space.alienBombs.push({ x: shooter.x, y: shooter.y + 6, vx: 0 });
+          }
         }
       }
     }
@@ -594,10 +662,14 @@ export class MiniGameEngine {
       ctx.fillStyle = '#ef4444';
       ctx.fillRect(bx, by, fillW, barH);
 
-      ctx.fillStyle = '#f87171';
+      ctx.fillStyle = b.isFinalBoss ? '#f4b637' : '#f87171';
       ctx.font = '6px "Press Start 2P", monospace, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(`JEFE HP: ${b.hp}/${b.maxHp}`, this.width / 2, 26);
+      ctx.fillText(
+        b.isFinalBoss ? `JEFE FINAL HP: ${b.hp}/${b.maxHp}` : `JEFE HP: ${b.hp}/${b.maxHp}`,
+        this.width / 2,
+        26
+      );
       ctx.textAlign = 'left';
     }
 
@@ -652,7 +724,36 @@ export class MiniGameEngine {
     for (const a of this.space.aliens) {
       if (!a.alive) continue;
 
-      if (a.isBoss) {
+      if (a.isFinalBoss) {
+        // --- LEVEL 15 DISTINCT CROWNED FINAL BOSS ---
+        // Golden Royal Crown on top
+        ctx.fillStyle = '#f4b637';
+        ctx.fillRect(a.x - 10, a.y - 16, 20, 4); // Crown base band
+        ctx.fillRect(a.x - 10, a.y - 20, 4, 4);  // Left peak
+        ctx.fillRect(a.x - 2, a.y - 22, 4, 6);   // Tall center peak
+        ctx.fillRect(a.x + 6, a.y - 20, 4, 4);   // Right peak
+        ctx.fillStyle = '#fef08a';
+        ctx.fillRect(a.x - 1, a.y - 22, 2, 2);   // Crown shine
+        ctx.fillStyle = '#ef4444';
+        ctx.fillRect(a.x - 1, a.y - 15, 2, 2);   // Ruby jewel center
+
+        // Heavy armored royal hull (purple + gold trim, wider silhouette)
+        ctx.fillStyle = a.color;
+        ctx.fillRect(a.x - 26, a.y - 8, 52, 16);
+        ctx.fillRect(a.x - 16, a.y - 12, 32, 4);
+        ctx.fillRect(a.x - 10, a.y + 8, 20, 5);
+        // Gold wing cannons & trim
+        ctx.fillStyle = '#f4b637';
+        ctx.fillRect(a.x - 28, a.y - 4, 5, 11);
+        ctx.fillRect(a.x + 23, a.y - 4, 5, 11);
+        ctx.fillRect(a.x - 16, a.y - 12, 32, 2);
+        // Glowing menacing eyes & energy core
+        ctx.fillStyle = '#ef4444';
+        ctx.fillRect(a.x - 12, a.y - 5, 5, 4);
+        ctx.fillRect(a.x + 7, a.y - 5, 5, 4);
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillRect(a.x - 4, a.y + 1, 8, 5);
+      } else if (a.isBoss) {
         // --- BOSS MOTHERSHIP ---
         ctx.fillStyle = a.color;
         // Central massive hull
@@ -724,19 +825,39 @@ export class MiniGameEngine {
       ctx.textAlign = 'left';
     }
 
+    // --- FINAL BOSS PIXEL ANNOUNCEMENT ("Preparate para el Jefe Final") ---
+    if (this.finalBossIntroTimer > 0 && !this.isPaused && !this.isGameOver && !this.isLevelClear) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.88)';
+      ctx.fillRect(10, 78, this.width - 20, 32);
+
+      ctx.strokeStyle = '#f4b637';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(10, 78, this.width - 20, 32);
+
+      ctx.fillStyle = '#f4b637';
+      ctx.font = '7px "Press Start 2P", monospace, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Preparate para el Jefe Final', this.width / 2, 97);
+      ctx.textAlign = 'left';
+    }
+
     // --- LEVEL CLEAR BANNER ---
     if (this.isLevelClear) {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
       ctx.fillRect(20, 50, this.width - 40, 55);
 
-      ctx.fillStyle = '#4ade80';
+      ctx.fillStyle = this.level === 15 ? '#f4b637' : '#4ade80';
       ctx.font = '9px "Press Start 2P", monospace, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('¡NIVEL SUPERADO!', this.width / 2, 70);
+      ctx.fillText(this.level === 15 ? '¡JEFE FINAL DERROTADO!' : '¡NIVEL SUPERADO!', this.width / 2, 70);
 
       ctx.fillStyle = '#fde047';
       ctx.font = '7px "Press Start 2P", monospace, sans-serif';
-      ctx.fillText(`SIGUIENTE: NIVEL ${this.level + 1}`, this.width / 2, 90);
+      ctx.fillText(
+        this.level === 15 ? '¡OBJETIVO CUMPLIDO!' : `SIGUIENTE: NIVEL ${this.level + 1}`,
+        this.width / 2,
+        90
+      );
       ctx.textAlign = 'left';
     }
 

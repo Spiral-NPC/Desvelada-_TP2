@@ -46,17 +46,17 @@ export const EyelidsOverlay: React.FC<EyelidsOverlayProps> = ({ isSleeping }) =>
           isSleeping ? 'opacity-100 delay-150' : 'opacity-0'
         }`}
       >
-        <div className="flex flex-col items-center gap-2 text-indigo-300">
+        <div className="flex flex-col items-center gap-2 text-[#f4b637]">
           <div className="flex items-center gap-2">
-            <EyeOff className="h-6 w-6 text-indigo-300 animate-pulse" />
-            <span className="font-pixel text-lg sm:text-xl tracking-wider text-indigo-200">
+            <EyeOff className="h-6 w-6 text-[#f4b637] animate-pulse" />
+            <span className="font-pixel text-lg sm:text-xl tracking-wider text-[#f4b637]">
               OJOS CERRADOS · FINGIENDO DORMIR
             </span>
           </div>
-          <div className="font-retro text-3xl sm:text-4xl text-indigo-400 tracking-widest animate-pulse">
+          <div className="font-retro text-3xl sm:text-4xl text-[#f4b637]/90 tracking-widest animate-pulse">
             Z z z . . .
           </div>
-          <p className="text-xs text-slate-400 font-sans-modern mt-1 bg-black/60 px-4 py-1.5 rounded-full border border-slate-800">
+          <p className="text-xs text-slate-300 font-sans-modern mt-1 bg-black/75 px-4 py-1.5 rounded-full border border-[#f4b637]/30">
             No abras los ojos hasta que el Cuco se aleje de tu habitación
           </p>
         </div>
