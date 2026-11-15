@@ -2,8 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CUCO_SPAWN_RATE_MULTIPLIER,
+  POST_TUTORIAL_MIN_SAFE_SEC,
+  CUCO_DANGER_HEARTBEAT_THRESHOLD_SEC,
   computeInitialCucoSpawnDelay,
+  computePostTutorialCucoDelay,
   computeCucoSpawnInterval,
+  computeCucoDangerHeartbeatState,
   computeNextCreakDelay,
   shouldPlayRoomCreak,
   computeNextBoredom,
@@ -19,21 +23,91 @@ import {
   pickNextCucoTrackIndex,
 } from './gameLogic';
 
-test('Cuco spawn rate uses gentle 0.85x reduction (interval divided by 0.85)', () => {
-  assert.equal(CUCO_SPAWN_RATE_MULTIPLIER, 0.85);
+test('Cuco spawn rate keeps steady 0.68x base without level acceleration', () => {
+  assert.equal(CUCO_SPAWN_RATE_MULTIPLIER, 0.68);
 
   const classicMin = computeCucoSpawnInterval('classic', 0);
   const classicMax = computeCucoSpawnInterval('classic', 1);
-  assert.ok(Math.abs(classicMin - 5.0 / 0.85) < 1e-9);
-  assert.ok(Math.abs(classicMax - 10.0 / 0.85) < 1e-9);
+  assert.ok(Math.abs(classicMin - 5.0 / 0.68) < 1e-9);
+  assert.ok(Math.abs(classicMax - 10.0 / 0.68) < 1e-9);
 
   const infiniteMin = computeCucoSpawnInterval('infinite', 0);
-  const infiniteMax = computeCucoSpawnInterval('infinite', 1);
-  assert.ok(Math.abs(infiniteMin - 4.0 / 0.85) < 1e-9);
-  assert.ok(Math.abs(infiniteMax - 8.0 / 0.85) < 1e-9);
+  assert.ok(Math.abs(infiniteMin - 4.0 / 0.68) < 1e-9);
 
   const initialDelay = computeInitialCucoSpawnDelay();
-  assert.ok(Math.abs(initialDelay - 3.5 / 0.85) < 1e-9);
+  assert.ok(Math.abs(initialDelay - 4.8 / 0.68) < 1e-9);
+});
+
+test('Post-tutorial Cuco grace period enforces at least 1 second of safety', () => {
+  assert.ok(POST_TUTORIAL_MIN_SAFE_SEC >= 1.0);
+  assert.equal(computePostTutorialCucoDelay(0), POST_TUTORIAL_MIN_SAFE_SEC);
+  assert.equal(computePostTutorialCucoDelay(0.4), POST_TUTORIAL_MIN_SAFE_SEC);
+  assert.equal(computePostTutorialCucoDelay(7.0), 7.0);
+});
+
+test('Danger heartbeat activates and accelerates near Cuco attack, stopping on loss or sleep', () => {
+  const safeState = computeCucoDangerHeartbeatState({
+    gameState: 'playing',
+    isSleeping: false,
+    tutorialActive: false,
+    monsters: [{ timer: CUCO_DANGER_HEARTBEAT_THRESHOLD_SEC + 0.5, isAttacking: false }],
+  });
+  assert.equal(safeState.active, false);
+
+  const earlyDanger = computeCucoDangerHeartbeatState({
+    gameState: 'playing',
+    isSleeping: false,
+    tutorialActive: false,
+    monsters: [{ timer: 2.0, isAttacking: false }],
+  });
+  const criticalDanger = computeCucoDangerHeartbeatState({
+    gameState: 'playing',
+    isSleeping: false,
+    tutorialActive: false,
+    monsters: [{ timer: 0.4, isAttacking: false }],
+  });
+  assert.equal(earlyDanger.active, true);
+  assert.equal(criticalDanger.active, true);
+  assert.ok(criticalDanger.urgency > earlyDanger.urgency);
+  assert.ok(criticalDanger.intervalSec < earlyDanger.intervalSec);
+
+  // Stops during tutorial, sleep, or when losing (jumpscare / intro)
+  assert.equal(
+    computeCucoDangerHeartbeatState({
+      gameState: 'playing',
+      isSleeping: true,
+      tutorialActive: false,
+      monsters: [{ timer: 0.4, isAttacking: false }],
+    }).active,
+    false
+  );
+  assert.equal(
+    computeCucoDangerHeartbeatState({
+      gameState: 'playing',
+      isSleeping: false,
+      tutorialActive: true,
+      monsters: [{ timer: 0.4, isAttacking: false }],
+    }).active,
+    false
+  );
+  assert.equal(
+    computeCucoDangerHeartbeatState({
+      gameState: 'jumpscare',
+      isSleeping: false,
+      tutorialActive: false,
+      monsters: [{ timer: 0.0, isAttacking: true }],
+    }).active,
+    false
+  );
+  assert.equal(
+    computeCucoDangerHeartbeatState({
+      gameState: 'intro',
+      isSleeping: false,
+      tutorialActive: false,
+      monsters: [{ timer: 0.4, isAttacking: false }],
+    }).active,
+    false
+  );
 });
 
 test('Room creak triggers only when playing and looking at the console', () => {

@@ -9,14 +9,17 @@ import {
   pickNextCucoTrackIndex,
 } from '../game/gameLogic';
 
+const CONSOLA_MUSIC_VOLUME = 0.48; // Slightly reduced console track volume so subtle tension cues stand out
+
 class SoundEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private ambientGain: GainNode | null = null;
   private ambientOsc: OscillatorNode | null = null;
   private ambientNoiseNode: AudioNode | null = null;
-  private heartbeatInterval: number | null = null;
+  private activeHeartbeatNodes: Set<{ osc: OscillatorNode; gain: GainNode }> = new Set();
   private isMuted: boolean = false;
+  private isTutorialSilent: boolean = false;
   private initialized: boolean = false;
   private ambienteAudio: HTMLAudioElement | null = null;
   private consolaAudio: HTMLAudioElement | null = null;
@@ -28,30 +31,34 @@ class SoundEngine {
   private activeCucoAudio: HTMLAudioElement | null = null;
   private lastCucoTrackIndex: number = -1;
 
+  private get isAudioSuppressed(): boolean {
+    return this.isMuted || this.isTutorialSilent;
+  }
+
   public init() {
     if (typeof window !== 'undefined') {
       try {
         if (!this.ambienteAudio) {
           this.ambienteAudio = new Audio('/assets/aistudio/ambiente_6d7ff092.mp3');
           this.ambienteAudio.loop = true;
-          this.ambienteAudio.volume = this.isMuted ? 0 : 0.65;
+          this.ambienteAudio.volume = this.isAudioSuppressed ? 0 : 0.65;
         }
         if (!this.consolaAudio) {
           this.consolaAudio = new Audio('/assets/aistudio/consola_b9774942.mp3');
           this.consolaAudio.loop = true;
-          this.consolaAudio.volume = this.isMuted ? 0 : 0.60;
+          this.consolaAudio.volume = this.isAudioSuppressed ? 0 : CONSOLA_MUSIC_VOLUME;
         }
         if (!this.gameOverAudio) {
           this.gameOverAudio = new Audio('/assets/aistudio/game_over_9d150ac7.mp3');
           this.gameOverAudio.loop = false;
-          this.gameOverAudio.volume = this.isMuted ? 0 : 0.85;
+          this.gameOverAudio.volume = this.isAudioSuppressed ? 0 : 0.85;
         }
         if (this.cucoAudios.length === 0) {
           this.cucoAudios = CUCO_SOUND_TRACKS.map((src) => {
             const audio = new Audio(src);
             audio.loop = false;
             audio.preload = 'auto';
-            audio.volume = this.isMuted ? 0 : 0.8;
+            audio.volume = this.isAudioSuppressed ? 0 : 0.8;
             return audio;
           });
           this.cucoBuffers = new Array(CUCO_SOUND_TRACKS.length).fill(null);
@@ -73,7 +80,7 @@ class SoundEngine {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.ctx = new AudioCtx();
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.value = this.isMuted ? 0 : 0.85;
+      this.masterGain.gain.value = this.isAudioSuppressed ? 0 : 0.85;
       this.masterGain.connect(this.ctx.destination);
       this.initialized = true;
 
@@ -109,20 +116,46 @@ class SoundEngine {
     });
   }
 
-  public setMuted(muted: boolean) {
-    this.isMuted = muted;
+  private applyEffectiveGain() {
+    const suppressed = this.isAudioSuppressed;
     if (this.masterGain && this.ctx) {
-      this.masterGain.gain.setTargetAtTime(muted ? 0 : 0.85, this.ctx.currentTime, 0.05);
+      if (suppressed) {
+        this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
+        this.masterGain.gain.setValueAtTime(0, this.ctx.currentTime);
+      } else {
+        this.masterGain.gain.setTargetAtTime(0.85, this.ctx.currentTime, 0.02);
+      }
     }
-    if (this.ambienteAudio) this.ambienteAudio.volume = muted ? 0 : 0.65;
-    if (this.consolaAudio) this.consolaAudio.volume = muted ? 0 : 0.60;
-    if (this.gameOverAudio) this.gameOverAudio.volume = muted ? 0 : 0.85;
-    if (muted) {
+    if (this.ambienteAudio) this.ambienteAudio.volume = suppressed ? 0 : 0.65;
+    if (this.consolaAudio) this.consolaAudio.volume = suppressed ? 0 : CONSOLA_MUSIC_VOLUME;
+    if (this.gameOverAudio) this.gameOverAudio.volume = suppressed ? 0 : 0.85;
+    if (suppressed) {
+      this.stopHeartbeat();
       this.stopCucoSounds();
     }
   }
 
+  public setTutorialSilent(silent: boolean) {
+    this.isTutorialSilent = silent;
+    if (silent) {
+      this.stopAmbienteMusic();
+      this.stopConsolaMusic();
+      this.stopGameOverMusic();
+    }
+    this.applyEffectiveGain();
+  }
+
+  public getIsTutorialSilent(): boolean {
+    return this.isTutorialSilent;
+  }
+
+  public setMuted(muted: boolean) {
+    this.isMuted = muted;
+    this.applyEffectiveGain();
+  }
+
   public triggerHaptic(pattern: number | number[]) {
+    if (this.isTutorialSilent) return;
     if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
       try {
         navigator.vibrate(pattern);
@@ -185,35 +218,61 @@ class SoundEngine {
   }
 
   // --- TENSION HEARTBEAT ---
-  public playHeartbeat(urgency: number = 0.5) {
-    if (!this.ctx || !this.masterGain || this.isMuted) return;
+  public stopHeartbeat() {
+    for (const entry of this.activeHeartbeatNodes) {
+      try {
+        entry.osc.onended = null;
+        entry.osc.stop();
+        entry.osc.disconnect();
+        entry.gain.disconnect();
+      } catch {}
+    }
+    this.activeHeartbeatNodes.clear();
+  }
 
+  public playHeartbeat(urgency: number = 0.5) {
+    if (!this.ctx || !this.masterGain || this.isAudioSuppressed) return;
+
+    const clampedUrgency = Math.max(0, Math.min(1, urgency));
     const now = this.ctx.currentTime;
+    const activeNodes = this.activeHeartbeatNodes;
+
     // Lub-dub
     const playThump = (time: number, freq: number, vol: number) => {
       if (!this.ctx || !this.masterGain) return;
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
+      const entry = { osc, gain };
+      activeNodes.add(entry);
 
       osc.type = 'sine';
       osc.frequency.setValueAtTime(freq, time);
-      osc.frequency.exponentialRampToValueAtTime(30, time + 0.12);
+      osc.frequency.exponentialRampToValueAtTime(30, time + 0.11);
 
       gain.gain.setValueAtTime(vol, time);
-      gain.gain.exponentialRampToValueAtTime(0.001, time + 0.14);
+      gain.gain.exponentialRampToValueAtTime(0.001, time + 0.13);
 
       osc.connect(gain);
       gain.connect(this.masterGain);
 
+      osc.onended = () => {
+        activeNodes.delete(entry);
+        try {
+          osc.disconnect();
+          gain.disconnect();
+        } catch {}
+      };
+
       osc.start(time);
-      osc.stop(time + 0.15);
+      osc.stop(time + 0.14);
     };
 
-    const volume = 0.3 + urgency * 0.4;
-    playThump(now, 65 + urgency * 20, volume);
-    playThump(now + 0.12, 55 + urgency * 15, volume * 0.7);
+    const volume = 0.42 + clampedUrgency * 0.45;
+    const secondOffset = Math.max(0.08, 0.12 - clampedUrgency * 0.035);
+    playThump(now, 68 + clampedUrgency * 22, volume);
+    playThump(now + secondOffset, 56 + clampedUrgency * 16, volume * 0.72);
 
-    this.triggerHaptic([35, 40, 25]);
+    this.triggerHaptic([35, 35, 25]);
   }
 
   // --- CUCO MONSTER SOUNDS (5 uploaded MP3 tracks with random non-repeating selection & volume variation) ---
@@ -240,6 +299,7 @@ class SoundEngine {
     pitchRange: [number, number] = [0.94, 1.06],
     forceWhenMuted: boolean = false
   ) {
+    if (this.isTutorialSilent) return;
     if (this.isMuted && !forceWhenMuted) return;
 
     const nextIdx = pickNextCucoTrackIndex(this.lastCucoTrackIndex, CUCO_SOUND_TRACKS.length);
@@ -298,7 +358,7 @@ class SoundEngine {
 
   // Subtle faint warning cue when the Cuco enters the room
   public playCucoSpawnWarning() {
-    if (this.isMuted) return;
+    if (this.isAudioSuppressed) return;
     this.playRandomCucoTrack(0.46, [0.92, 1.04]);
     this.triggerHaptic(25);
   }
@@ -308,7 +368,7 @@ class SoundEngine {
    * triggered while the player is focused on the handheld console.
    */
   public playRoomCreak() {
-    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    if (!this.ctx || !this.masterGain || this.isAudioSuppressed) return;
     const now = this.ctx.currentTime;
     const duration = 0.45 + Math.random() * 0.45; // 0.45s - 0.90s subtle creak
 
@@ -367,19 +427,19 @@ class SoundEngine {
    * Uses a randomly varied MP3 track and randomized organic volume range.
    */
   public playCucoBeamScreech() {
-    if (this.isMuted) return;
+    if (this.isAudioSuppressed) return;
     this.playRandomCucoTrack(1.0, [0.95, 1.08]);
     this.triggerHaptic([35, 25, 45]);
   }
 
   public playMonsterStalk() {
-    if (this.isMuted) return;
+    if (this.isAudioSuppressed) return;
     this.playRandomCucoTrack(0.65, [0.9, 1.02]);
     this.triggerHaptic([60, 50, 60]);
   }
 
   public playMonsterRetreat() {
-    if (this.isMuted) return;
+    if (this.isAudioSuppressed) return;
     this.playRandomCucoTrack(0.52, [0.86, 0.95]);
   }
 
@@ -443,7 +503,7 @@ class SoundEngine {
 
   // --- SLEEP / FEIGN SLEEP ---
   public playFeignSleep() {
-    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    if (!this.ctx || !this.masterGain || this.isAudioSuppressed) return;
     const now = this.ctx.currentTime;
 
     // Soft breath in
@@ -487,7 +547,7 @@ class SoundEngine {
 
   // --- RETRO CHIPTUNE SOUNDS FOR CONSOLE ---
   public playRetroJump() {
-    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    if (!this.ctx || !this.masterGain || this.isAudioSuppressed) return;
     const now = this.ctx.currentTime;
 
     const osc = this.ctx.createOscillator();
@@ -508,7 +568,7 @@ class SoundEngine {
   }
 
   public playRetroShoot() {
-    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    if (!this.ctx || !this.masterGain || this.isAudioSuppressed) return;
     const now = this.ctx.currentTime;
 
     const osc = this.ctx.createOscillator();
@@ -529,7 +589,7 @@ class SoundEngine {
   }
 
   public playRetroExplosion() {
-    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    if (!this.ctx || !this.masterGain || this.isAudioSuppressed) return;
     const now = this.ctx.currentTime;
 
     const bufferSize = this.ctx.sampleRate * 0.25;
@@ -562,7 +622,7 @@ class SoundEngine {
   }
 
   public playRetroCoin() {
-    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    if (!this.ctx || !this.masterGain || this.isAudioSuppressed) return;
     const now = this.ctx.currentTime;
 
     const osc = this.ctx.createOscillator();
@@ -616,7 +676,7 @@ class SoundEngine {
   }
 
   public playClockTick() {
-    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    if (!this.ctx || !this.masterGain || this.isAudioSuppressed) return;
     const now = this.ctx.currentTime;
 
     const osc = this.ctx.createOscillator();
@@ -633,7 +693,7 @@ class SoundEngine {
   }
 
   public playButtonClick() {
-    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    if (!this.ctx || !this.masterGain || this.isAudioSuppressed) return;
     const now = this.ctx.currentTime;
 
     const osc = this.ctx.createOscillator();
@@ -658,10 +718,10 @@ class SoundEngine {
 
   public playAmbienteMusic() {
     this.stopConsolaMusic();
-    // Do not play ambient music while game over sound is actively playing
-    if (this.isGameOverPlaying()) return;
+    // Do not play ambient music while game over sound is actively playing or tutorial is active
+    if (this.isGameOverPlaying() || this.isAudioSuppressed) return;
 
-    if (!this.ambienteAudio || this.isMuted) return;
+    if (!this.ambienteAudio) return;
     if (this.ambienteAudio.paused) {
       this.ambienteAudio.volume = 0.65;
       this.ambienteAudio.play().catch(() => {});
@@ -678,9 +738,9 @@ class SoundEngine {
   public playConsolaMusic() {
     this.stopAmbienteMusic();
     this.stopGameOverMusic();
-    if (!this.consolaAudio || this.isMuted) return;
+    if (!this.consolaAudio || this.isAudioSuppressed) return;
     if (this.consolaAudio.paused) {
-      this.consolaAudio.volume = 0.60;
+      this.consolaAudio.volume = CONSOLA_MUSIC_VOLUME;
       this.consolaAudio.play().catch(() => {});
     }
   }
@@ -728,6 +788,7 @@ class SoundEngine {
     this.stopConsolaMusic();
     this.stopGameOverMusic();
     this.stopCucoSounds();
+    this.stopHeartbeat();
   }
 
   public dispose() {

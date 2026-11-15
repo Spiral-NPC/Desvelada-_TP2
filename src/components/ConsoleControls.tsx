@@ -11,6 +11,7 @@ interface ConsoleControlsProps {
   visible: boolean;
   onDpadChange: (dir: { up: boolean; down: boolean; left: boolean; right: boolean }) => void;
   onButtonAPress: () => void;
+  highlightControls?: boolean;
 }
 
 type DpadDir = 'up' | 'down' | 'left' | 'right';
@@ -19,6 +20,7 @@ export const ConsoleControls: React.FC<ConsoleControlsProps> = React.memo(({
   visible,
   onDpadChange,
   onButtonAPress,
+  highlightControls = false,
 }) => {
   const [pressedDir, setPressedDir] = useState<DpadDir | null>(null);
   const [isAPressed, setIsAPressed] = useState<boolean>(false);
@@ -87,10 +89,19 @@ export const ConsoleControls: React.FC<ConsoleControlsProps> = React.memo(({
   return (
     <div
       data-testid="console-controls"
-      className="pointer-events-none fixed bottom-3 sm:bottom-6 left-0 right-0 z-20 flex items-end justify-between px-3 sm:px-8 pb-1 select-none"
+      className={`pointer-events-none fixed bottom-3 sm:bottom-6 left-0 right-0 flex items-end justify-between px-3 sm:px-8 pb-1 select-none ${
+        highlightControls ? 'z-50' : 'z-20'
+      }`}
     >
       {/* --- ENLARGED D-PAD (Left) --- */}
-      <div className="pointer-events-auto relative h-36 w-36 sm:h-44 sm:w-44">
+      <div
+        data-testid="dpad-controls"
+        className={`pointer-events-auto relative h-36 w-36 sm:h-44 sm:w-44 rounded-3xl transition-all ${
+          highlightControls
+            ? 'ring-4 ring-[#f4b637] bg-[#f4b637]/10 shadow-[0_0_28px_rgba(244,182,55,0.9)]'
+            : ''
+        }`}
+      >
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="relative h-36 w-36 sm:h-42 sm:w-42">
             {/* Up Button */}
@@ -175,7 +186,14 @@ export const ConsoleControls: React.FC<ConsoleControlsProps> = React.memo(({
 
       {/* --- ENLARGED A ACTION BUTTON ONLY (Right) --- */}
       <div className="pointer-events-auto flex items-end pb-1 pr-1 sm:pr-2">
-        <div className="flex flex-col items-center gap-1.5">
+        <div
+          data-testid="button-a-control"
+          className={`flex flex-col items-center gap-1.5 rounded-3xl p-1.5 transition-all ${
+            highlightControls
+              ? 'ring-4 ring-[#f4b637] bg-[#f4b637]/10 shadow-[0_0_28px_rgba(244,182,55,0.9)]'
+              : ''
+          }`}
+        >
           <button
             type="button"
             onPointerDown={handleAPointerDown}

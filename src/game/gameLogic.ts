@@ -1,7 +1,9 @@
 import { GameMode, GameState } from '../types';
 
-export const CUCO_SPAWN_RATE_MULTIPLIER = 0.85; // Gentle reduction (~15% lower than original rate, ~10.5% lower than 0.95x)
-export const BASE_INITIAL_CUCO_DELAY_SEC = 3.5;
+export const CUCO_SPAWN_RATE_MULTIPLIER = 0.68; // Reduced base rate (~20% slower than 0.85x) so Cucos appear less often
+export const BASE_INITIAL_CUCO_DELAY_SEC = 4.8; // ~7.06s initial delay before first Cuco spawns
+export const POST_TUTORIAL_MIN_SAFE_SEC = 1.8; // Minimum >1s grace window after tutorial before Cuco can appear
+export const CUCO_DANGER_HEARTBEAT_THRESHOLD_SEC = 2.6; // Remaining attack seconds when accelerating heartbeat begins
 
 /**
  * Initial countdown (seconds) before the first Cuco spawns.
@@ -11,17 +13,73 @@ export function computeInitialCucoSpawnDelay(): number {
 }
 
 /**
- * Computes the next Cuco spawn countdown interval (seconds).
- * Reducing the spawn rate increases the interval between spawns by 1 / CUCO_SPAWN_RATE_MULTIPLIER.
+ * Guarantees a minimum safe grace period (>= 1s) right after finishing the tutorial
+ * so the player can absorb instructions and start advancing in the minigame.
  */
-export function computeCucoSpawnInterval(mode: GameMode, rand: number = Math.random()): number {
+export function computePostTutorialCucoDelay(currentCountdown: number): number {
+  return Math.max(currentCountdown, POST_TUTORIAL_MIN_SAFE_SEC);
+}
+
+/**
+ * Computes the next Cuco spawn countdown interval (seconds).
+ * Keeps a steady, balanced spawn cadence without accelerating across minigame levels.
+ */
+export function computeCucoSpawnInterval(
+  mode: GameMode,
+  rand: number = Math.random()
+): number {
   const clampedRand = Math.max(0, Math.min(1, rand));
   const baseInterval =
     mode === 'infinite'
-      ? 4.0 + clampedRand * 4.0 // 4s - 8s base -> ~4.71s - 9.41s
-      : 5.0 + clampedRand * 5.0; // 5s - 10s base -> ~5.88s - 11.76s
+      ? 4.0 + clampedRand * 4.0
+      : 5.0 + clampedRand * 5.0;
 
   return baseInterval / CUCO_SPAWN_RATE_MULTIPLIER;
+}
+
+export interface DangerHeartbeatState {
+  active: boolean;
+  urgency: number;
+  intervalSec: number;
+}
+
+/**
+ * Determines whether the Cuco is about to catch the player and calculates
+ * accelerating heartbeat urgency [0..1] and interval [0.62s..0.26s].
+ * Immediately stops when the player loses, sleeps, wins, or is in the tutorial.
+ */
+export function computeCucoDangerHeartbeatState(params: {
+  gameState: GameState;
+  isSleeping: boolean;
+  tutorialActive: boolean;
+  monsters: ReadonlyArray<{ timer: number; isAttacking: boolean }>;
+}): DangerHeartbeatState {
+  if (
+    params.gameState !== 'playing' ||
+    params.isSleeping ||
+    params.tutorialActive ||
+    params.monsters.length === 0
+  ) {
+    return { active: false, urgency: 0, intervalSec: 0 };
+  }
+
+  let minTimer = Infinity;
+  for (const m of params.monsters) {
+    if (!m.isAttacking && m.timer > 0 && m.timer < minTimer) {
+      minTimer = m.timer;
+    }
+  }
+
+  if (!Number.isFinite(minTimer) || minTimer > CUCO_DANGER_HEARTBEAT_THRESHOLD_SEC) {
+    return { active: false, urgency: 0, intervalSec: 0 };
+  }
+
+  const urgency = Math.max(
+    0,
+    Math.min(1, 1 - minTimer / CUCO_DANGER_HEARTBEAT_THRESHOLD_SEC)
+  );
+  const intervalSec = 0.62 - urgency * 0.36; // Accelerates smoothly from ~97 BPM to ~230 BPM
+  return { active: true, urgency, intervalSec };
 }
 
 /**
@@ -86,7 +144,7 @@ export function shouldSyncBoredomUi(
   return elapsedSinceCommitMs >= 100 && Math.abs(nextValue - prevCommitted) >= 0.4;
 }
 
-export const TUTORIAL_STORAGE_KEY = 'desvelada_tutorial_seen';
+export const TUTORIAL_STORAGE_KEY = 'desvelada_tutorial_v2_seen';
 export const FINAL_BOSS_LEVEL = 15;
 
 /**

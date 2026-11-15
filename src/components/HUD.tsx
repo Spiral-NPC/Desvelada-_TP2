@@ -22,6 +22,13 @@ import {
 import { SensorStatus, GameMode } from '../types';
 import { computeRemainingLevels, isHudImminentDanger } from '../game/gameLogic';
 
+export type TutorialHighlightTarget =
+  | 'controls'
+  | 'sleep-meter'
+  | 'hud-stats'
+  | 'sleep-button'
+  | null;
+
 interface HUDProps {
   boredom: number; // 0 to 100
   score: number;
@@ -37,6 +44,7 @@ interface HUDProps {
   sensorStatus: SensorStatus;
   isMuted: boolean;
   onToggleMute: () => void;
+  tutorialHighlight?: TutorialHighlightTarget;
 }
 
 export const HUD: React.FC<HUDProps> = React.memo(({
@@ -51,6 +59,7 @@ export const HUD: React.FC<HUDProps> = React.memo(({
   onSleepEnd,
   isMuted,
   onToggleMute,
+  tutorialHighlight = null,
 }) => {
   const isHighBoredom = boredom > 65;
   const imminentDanger = isHudImminentDanger({ boredom, cucoInBeam });
@@ -64,7 +73,14 @@ export const HUD: React.FC<HUDProps> = React.memo(({
         {/* Top bar: Score, Remaining Levels & Sound Toggle */}
         <div className="flex w-full items-center justify-between gap-1">
           {/* Left: Score, Mode & Remaining Minigame Levels */}
-          <div className="pointer-events-auto flex flex-wrap items-center gap-1.5">
+          <div
+            data-testid="hud-stats"
+            className={`pointer-events-auto flex flex-wrap items-center gap-1.5 rounded-2xl transition-all ${
+              tutorialHighlight === 'hud-stats'
+                ? 'p-1 ring-3 ring-[#f4b637] bg-slate-950/90 shadow-[0_0_24px_rgba(244,182,55,0.9)]'
+                : ''
+            }`}
+          >
             <div
               data-testid="hud-score"
               className="flex items-center gap-1 rounded-xl bg-slate-950/90 px-2.5 py-1 text-white shadow-lg border border-[#f4b637]/35"
@@ -123,12 +139,15 @@ export const HUD: React.FC<HUDProps> = React.memo(({
         <div className="pointer-events-auto flex flex-col items-center w-full max-w-sm px-2">
           <button
             type="button"
+            data-testid="sleep-button"
             onPointerDown={canSleep || isSleeping ? onSleepStart : undefined}
             onPointerUp={onSleepEnd}
             onPointerLeave={onSleepEnd}
             disabled={!canSleep && !isSleeping}
             className={`w-full flex items-center justify-center gap-3 rounded-2xl py-3 px-4 shadow-2xl transition-all select-none ${
-              isSleeping
+              tutorialHighlight === 'sleep-button'
+                ? 'bg-slate-900 text-[#f4b637] border-2 border-[#f4b637] ring-4 ring-[#f4b637] shadow-[0_0_28px_rgba(244,182,55,0.95)] opacity-100'
+                : isSleeping
                 ? 'bg-slate-900 text-[#f4b637] border-2 border-[#f4b637] scale-95 shadow-[#f4b637]/30 ring-4 ring-[#f4b637]/25'
                 : canSleep
                 ? 'bg-[#f4b637] text-slate-950 border-2 border-yellow-100 shadow-[0_0_24px_rgba(244,182,55,0.65)] animate-pulse active:scale-95 cursor-pointer ring-2 ring-[#f4b637]/60'
@@ -193,7 +212,9 @@ export const HUD: React.FC<HUDProps> = React.memo(({
             data-testid="boredom-meter"
             data-danger={imminentDanger ? 'true' : 'false'}
             className={`mt-1.5 w-full rounded-xl bg-slate-950/95 p-2 shadow-2xl ring-1 ring-black transition-colors ${
-              imminentDanger
+              tutorialHighlight === 'sleep-meter'
+                ? 'border-2 border-[#f4b637] ring-4 ring-[#f4b637] shadow-[0_0_28px_rgba(244,182,55,0.95)]'
+                : imminentDanger
                 ? 'border-2 border-[#f4b637] animate-hud-alert-pulse'
                 : 'border border-[#f4b637]/30'
             }`}

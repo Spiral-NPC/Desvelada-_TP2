@@ -11,7 +11,9 @@ import { MiniGameEngine } from './minigames/MiniGameEngine';
 import { RoomScene } from './three/RoomScene';
 import {
   computeInitialCucoSpawnDelay,
+  computePostTutorialCucoDelay,
   computeCucoSpawnInterval,
+  computeCucoDangerHeartbeatState,
   computeNextCreakDelay,
   shouldPlayRoomCreak,
   computeNextBoredom,
@@ -20,7 +22,7 @@ import {
   shouldShowFirstTimeTutorial,
   shouldWinClassicOnLevelClear,
 } from './game/gameLogic';
-import { HUD } from './components/HUD';
+import { HUD, TutorialHighlightTarget } from './components/HUD';
 import { ConsoleControls } from './components/ConsoleControls';
 import { PermissionsModal } from './components/PermissionsModal';
 import { TutorialOverlay } from './components/TutorialOverlay';
@@ -80,6 +82,7 @@ export default function App() {
   const lastBeamScreechAtRef = useRef<number>(0);
   const [lossNotice, setLossNotice] = useState<'cuco' | 'sleep' | null>(null);
   const [showTutorial, setShowTutorial] = useState<boolean>(false);
+  const [tutorialHighlight, setTutorialHighlight] = useState<TutorialHighlightTarget>(null);
   const showTutorialRef = useRef<boolean>(false);
   showTutorialRef.current = showTutorial;
 
@@ -94,6 +97,8 @@ export default function App() {
   const attackingMonsterId = useRef<string | null>(null);
   const cucoSpawnCountdown = useRef<number>(computeInitialCucoSpawnDelay());
   const creakCountdown = useRef<number>(computeNextCreakDelay());
+  const heartbeatCountdown = useRef<number>(0);
+  const wasHeartbeatActive = useRef<boolean>(false);
   const jumpscareTimer = useRef<number>(0);
   const gameTimeSecondsRef = useRef<number>(0);
   const [showGameOver, setShowGameOver] = useState<boolean>(false);
@@ -140,7 +145,7 @@ export default function App() {
       });
     };
 
-    // Level up reward
+    // Level up reward (steady Cuco spawn cadence without level acceleration)
     miniGame.onLevelUp = (newLevel) => {
       commitBoredom(Math.max(0, boredomRef.current - 22), true); // big adrenaline rush on level clear!
       setStats((prev) => {
@@ -156,6 +161,7 @@ export default function App() {
     // Classic Mode Victory: Reach and clear Level 15 (Crowned Final Boss)
     miniGame.onLevelCleared = (clearedLevel) => {
       if (shouldWinClassicOnLevelClear(modeRef.current, clearedLevel)) {
+        soundEngine.stopHeartbeat();
         soundEngine.stopAmbienteMusic();
         soundEngine.stopConsolaMusic();
         soundEngine.playVictoryFanfare();
@@ -209,10 +215,11 @@ export default function App() {
           : gameState === 'victory' || gameState === 'slept'
           ? 'gameover'
           : 'playing';
+      document.body.dataset.tutorial = showTutorial ? 'true' : 'false';
     }
-  }, [gameState]);
+  }, [gameState, showTutorial]);
 
-  // Support ?autostart=1 (and optional ?level=15 / ?tutorial=1) to jump directly into gameplay
+  // Support ?autostart=1 (and optional ?level=15 / ?tutorial=0) to jump directly into gameplay
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
@@ -220,7 +227,7 @@ export default function App() {
         const parsedLevel = parseInt(params.get('level') || '0', 10);
         handleStartGame({
           mode: 'classic',
-          skipTutorial: params.get('tutorial') !== '1',
+          skipTutorial: params.get('tutorial') === '0',
           startLevel: parsedLevel > 0 ? parsedLevel : undefined,
         });
       }
@@ -229,6 +236,12 @@ export default function App() {
 
   // --- START GAME (Touch only) ---
   const handleStartGame = (options: { mode: GameMode; skipTutorial?: boolean; startLevel?: number }) => {
+    const storedFlag =
+      typeof window !== 'undefined' ? localStorage.getItem(TUTORIAL_STORAGE_KEY) : '1';
+    const shouldActivateTutorial =
+      !options.skipTutorial && shouldShowFirstTimeTutorial(storedFlag, false);
+
+    soundEngine.setTutorialSilent(shouldActivateTutorial);
     soundEngine.init();
     soundEngine.stopGameOverMusic();
     soundEngine.stopAmbienteMusic();
@@ -236,10 +249,6 @@ export default function App() {
     modeRef.current = options.mode;
     gameTimeSecondsRef.current = 0;
 
-    const storedFlag =
-      typeof window !== 'undefined' ? localStorage.getItem(TUTORIAL_STORAGE_KEY) : '1';
-    const shouldActivateTutorial =
-      !options.skipTutorial && shouldShowFirstTimeTutorial(storedFlag, false);
     showTutorialRef.current = shouldActivateTutorial;
     setShowTutorial(shouldActivateTutorial);
 
@@ -253,6 +262,8 @@ export default function App() {
     attackingMonsterId.current = null;
     cucoSpawnCountdown.current = computeInitialCucoSpawnDelay();
     creakCountdown.current = computeNextCreakDelay();
+    heartbeatCountdown.current = 0;
+    wasHeartbeatActive.current = false;
     jumpscareTimer.current = 0;
     lastBeamScreechAtRef.current = 0;
     setShowGameOver(false);
@@ -278,8 +289,13 @@ export default function App() {
       gameTimeSeconds: 0,
     }));
 
-    // Player starts looking at console, play console track
-    soundEngine.playConsolaMusic();
+    if (shouldActivateTutorial) {
+      // Zero sound while tutorial overlay explains mechanics
+      soundEngine.setTutorialSilent(true);
+    } else {
+      soundEngine.setTutorialSilent(false);
+      soundEngine.playConsolaMusic();
+    }
     setGameState('playing');
   };
 
@@ -289,7 +305,17 @@ export default function App() {
     }
     showTutorialRef.current = false;
     setShowTutorial(false);
+    setTutorialHighlight(null);
+
+    // Guarantee at least >1s safe grace window after finishing tutorial before Cuco can appear
+    cucoSpawnCountdown.current = computePostTutorialCucoDelay(cucoSpawnCountdown.current);
+    creakCountdown.current = computeNextCreakDelay();
+    heartbeatCountdown.current = 0;
+    wasHeartbeatActive.current = false;
+
     miniGameRef.current?.setPaused(false);
+    soundEngine.setTutorialSilent(false);
+    soundEngine.playConsolaMusic();
   }, []);
 
   // Toggle Mute
@@ -315,7 +341,7 @@ export default function App() {
   // 1. Al jugar en la consola NO te podés hacer el dormido
   // 2. Para hacerte el dormido tenés que apuntar al Cuco con la linterna (verlo)
   const startSleeping = useCallback(() => {
-    if (gameState !== 'playing') return;
+    if (gameState !== 'playing' || showTutorialRef.current) return;
     if (lookingAtConsole) return;
     if (!sceneRef.current?.isCucoInFlashlightBeam) return;
 
@@ -330,7 +356,7 @@ export default function App() {
   // Keyboard navigation & controls
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (gameState !== 'playing') return;
+      if (gameState !== 'playing' || showTutorialRef.current) return;
       if (e.repeat) return;
       if (e.code === 'KeyC') toggleLook();
       if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyZ') {
@@ -372,7 +398,7 @@ export default function App() {
 
   // Touch / Pointer Drag for room rotation
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (gameState !== 'playing') return;
+    if (gameState !== 'playing' || showTutorialRef.current) return;
     if ((e.target as HTMLElement).closest('button, input, select')) return;
     isDragging.current = true;
     lastTouchX.current = e.clientX;
@@ -380,7 +406,7 @@ export default function App() {
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (gameState !== 'playing' || !isDragging.current) return;
+    if (gameState !== 'playing' || showTutorialRef.current || !isDragging.current) return;
     const deltaX = e.clientX - lastTouchX.current;
     const deltaY = e.clientY - lastTouchY.current;
     lastTouchX.current = e.clientX;
@@ -410,6 +436,8 @@ export default function App() {
 
   // Restart game after Victory/GameOver (tutorial NEVER triggers on retry)
   const handleRestart = () => {
+    soundEngine.setTutorialSilent(false);
+    soundEngine.stopHeartbeat();
     soundEngine.stopGameOverMusic();
     soundEngine.stopAmbienteMusic();
     showTutorialRef.current = false;
@@ -425,6 +453,8 @@ export default function App() {
     attackingMonsterId.current = null;
     cucoSpawnCountdown.current = computeInitialCucoSpawnDelay();
     creakCountdown.current = computeNextCreakDelay();
+    heartbeatCountdown.current = 0;
+    wasHeartbeatActive.current = false;
     jumpscareTimer.current = 0;
     lastBeamScreechAtRef.current = 0;
     setShowGameOver(false);
@@ -456,6 +486,8 @@ export default function App() {
 
   // Return to Initial Start Menu & Reset all game states
   const handleMainMenu = useCallback(() => {
+    soundEngine.setTutorialSilent(false);
+    soundEngine.stopHeartbeat();
     soundEngine.stopConsolaMusic();
     // USER REQUIREMENT: "ambiente.mp3" sea la canción del menú, y evitar que se reproduzca al mismo tiempo que game over.mp3
     if (!soundEngine.isGameOverPlaying()) {
@@ -474,6 +506,8 @@ export default function App() {
     attackingMonsterId.current = null;
     cucoSpawnCountdown.current = computeInitialCucoSpawnDelay();
     creakCountdown.current = computeNextCreakDelay();
+    heartbeatCountdown.current = 0;
+    wasHeartbeatActive.current = false;
     jumpscareTimer.current = 0;
     lastBeamScreechAtRef.current = 0;
     setShowGameOver(false);
@@ -534,12 +568,14 @@ export default function App() {
 
         // Auto-detect if player is looking at console (pitch < -0.22)
         const isLookingDown = cameraPitch.current < -0.22;
+        const tutorialActive = showTutorialRef.current;
+
         if (lookingAtConsoleRef.current !== isLookingDown) {
           lookingAtConsoleRef.current = isLookingDown;
           setLookingAtConsole(isLookingDown);
 
           // Audio transition triggered only on view switch (avoids 60Hz media element seeks)
-          if (gameState === 'playing') {
+          if (gameState === 'playing' && !tutorialActive) {
             if (isLookingDown) {
               soundEngine.playConsolaMusic();
             } else {
@@ -548,8 +584,6 @@ export default function App() {
             }
           }
         }
-
-        const tutorialActive = showTutorialRef.current;
 
         // Subtle random bedroom creaking sounds when focused on the console to build tension
         if (!tutorialActive && shouldPlayRoomCreak({ gameState, lookingAtConsole: isLookingDown, isSleeping })) {
@@ -601,6 +635,7 @@ export default function App() {
             isSleeping
           );
           if (!isLookingDown && nextBoredom >= 100) {
+            soundEngine.stopHeartbeat();
             soundEngine.playSleepFall();
             soundEngine.playGameOverMusic(() => {
               if (gameStateRef.current === 'intro') {
@@ -648,8 +683,11 @@ export default function App() {
               soundEngine.playCucoSpawnWarning();
             }
 
-            // Spawn rate reduced by 5% via computeCucoSpawnInterval
-            cucoSpawnCountdown.current = computeCucoSpawnInterval(modeRef.current);
+            // Steady base spawn interval without level-based acceleration
+            cucoSpawnCountdown.current = computeCucoSpawnInterval(
+              modeRef.current,
+              Math.random()
+            );
           }
 
           // Process all active monsters
@@ -692,7 +730,8 @@ export default function App() {
                     targetYaw.current = -Math.atan2(loc.pos[0], -loc.pos[2]);
                   }
 
-                  // Stop gameplay audio immediately on jump
+                  // Stop gameplay audio & danger heartbeat immediately on jump/loss
+                  soundEngine.stopHeartbeat();
                   soundEngine.stopAmbienteMusic();
                   soundEngine.stopConsolaMusic();
                   soundEngine.playJumpscare();
@@ -721,6 +760,7 @@ export default function App() {
 
           // Al perder por ataque de Cuco, reproducir "game over.mp3" una vez, luego ambiente.mp3 en menú
           if (jumpscareTimer.current >= 1.2) {
+            soundEngine.stopHeartbeat();
             soundEngine.playGameOverMusic(() => {
               if (gameStateRef.current === 'intro') {
                 soundEngine.playAmbienteMusic();
@@ -731,8 +771,29 @@ export default function App() {
           }
         }
 
-        // 3. Update Scene & Handheld Console
-        scene.update(dt, isLookingDown, cameraPitch.current, miniGame.renderVersion);
+        // Accelerating danger heartbeat when the Cuco is about to catch the player
+        // Immediately stops on loss (jumpscare/intro), sleep, victory, or during tutorial
+        const hb = computeCucoDangerHeartbeatState({
+          gameState,
+          isSleeping,
+          tutorialActive,
+          monsters: monstersRef.current,
+        });
+        if (hb.active) {
+          heartbeatCountdown.current -= dt;
+          if (heartbeatCountdown.current <= 0) {
+            soundEngine.playHeartbeat(hb.urgency);
+            heartbeatCountdown.current = hb.intervalSec;
+          }
+          wasHeartbeatActive.current = true;
+        } else if (wasHeartbeatActive.current) {
+          soundEngine.stopHeartbeat();
+          heartbeatCountdown.current = 0;
+          wasHeartbeatActive.current = false;
+        }
+
+        // 3. Update Scene & Handheld Console (freeze particle/scene motion while tutorial is open)
+        scene.update(tutorialActive ? 0 : dt, isLookingDown, cameraPitch.current, miniGame.renderVersion);
         // Track whether player is aiming flashlight at Cuco in the dark room
         const nextCucoInBeam = scene.isCucoInFlashlightBeam && !isLookingDown;
         if (cucoInBeamRef.current !== nextCucoInBeam) {
@@ -770,6 +831,7 @@ export default function App() {
 
   const handleDpadChange = useCallback(
     (dir: { up: boolean; down: boolean; left: boolean; right: boolean }) => {
+      if (showTutorialRef.current) return;
       const mini = miniGameRef.current;
       if (mini) {
         mini.dpadUp = dir.up;
@@ -782,6 +844,7 @@ export default function App() {
   );
 
   const handleButtonAPress = useCallback(() => {
+    if (showTutorialRef.current) return;
     miniGameRef.current?.triggerActionA();
   }, []);
 
@@ -853,17 +916,20 @@ export default function App() {
             sensorStatus={sensorStatus}
             isMuted={isMuted}
             onToggleMute={toggleMute}
+            tutorialHighlight={showTutorial ? tutorialHighlight : null}
           />
 
           <ConsoleControls
             visible={lookingAtConsole}
             onDpadChange={handleDpadChange}
             onButtonAPress={handleButtonAPress}
+            highlightControls={showTutorial && tutorialHighlight === 'controls'}
           />
 
           <TutorialOverlay
             visible={showTutorial}
             onComplete={handleTutorialComplete}
+            onHighlightChange={setTutorialHighlight}
           />
         </>
       )}
